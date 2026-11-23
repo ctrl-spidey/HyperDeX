@@ -542,7 +542,6 @@ public class LauncherDockHook {
                 hotSeatsView.setLayoutParams(flp);
             }
             hotSeatsView.setTranslationX(0f);
-            hotSeatsView.setTranslationX(0f);
             hotSeatsView.setBackground(null);
 
             // 4. Set the solid full-width Samsung DeX acrylic taskbar background on parent dock container
@@ -599,11 +598,6 @@ public class LauncherDockHook {
             }
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Error in applyDockContainerDeXStyle: " + t);
-        }
-    }
-
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "Error in applyDeXStyle: " + t.getMessage());
         }
     }
 
