@@ -42,6 +42,8 @@ public class LauncherDockHook {
 
     public static void init(XC_LoadPackage.LoadPackageParam lpparam) {
         hookHotSeats(lpparam);
+        hookHotSeatsListContent(lpparam);
+        hookDeviceConfig(lpparam);
         hookLaptopDockController(lpparam);
         hookLaptopModeController(lpparam);
         hookDockContainerViews(lpparam);
@@ -112,9 +114,49 @@ public class LauncherDockHook {
                                     v.setLayoutParams(flp);
                                 }
                             }
-                            v.setTranslationX(0f);
+                            int left = v.getLeft();
+                            int targetLeft = dp(context, 8);
+                            if (left > targetLeft) {
+                                v.setTranslationX(targetLeft - left);
+                            } else {
+                                v.setTranslationX(0f);
+                            }
+
+                            try {
+                                Object listContent = XposedHelpers.getObjectField(v, "mListContent");
+                                if (listContent instanceof View) {
+                                    View lc = (View) listContent;
+                                    int lcLeft = lc.getLeft();
+                                    int lcTarget = dp(context, 8);
+                                    if (lcLeft > lcTarget) {
+                                        lc.setTranslationX(lcTarget - lcLeft);
+                                    } else {
+                                        lc.setTranslationX(0f);
+                                    }
+                                }
+                            } catch (Throwable ignored) {}
                         } else {
                             v.setTranslationX(0f);
+                            try {
+                                Object listContent = XposedHelpers.getObjectField(v, "mListContent");
+                                if (listContent instanceof View) {
+                                    ((View) listContent).setTranslationX(0f);
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                }
+            });
+
+            // Hook updatePadding
+            XposedBridge.hookAllMethods(hotSeatsCls, "updatePadding", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.thisObject instanceof View) {
+                        View v = (View) param.thisObject;
+                        Context context = v.getContext();
+                        if (ConfigManager.shouldApplyDeXTaskbar(context)) {
+                            v.setPadding(dp(context, 8), v.getPaddingTop(), dp(context, 8), v.getPaddingBottom());
                         }
                     }
                 }
@@ -123,6 +165,54 @@ public class LauncherDockHook {
             XposedBridge.log(TAG + "HotSeats hooks applied successfully");
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Failed hooking HotSeats: " + t);
+        }
+    }
+
+    private static void hookHotSeatsListContent(XC_LoadPackage.LoadPackageParam lpparam) {
+        try {
+            Class<?> listContentCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.hotseats.HotSeatsListContent", lpparam.classLoader);
+            if (listContentCls == null) return;
+
+            XposedBridge.hookAllMethods(listContentCls, "onLayout", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.thisObject instanceof View) {
+                        View lc = (View) param.thisObject;
+                        Context context = lc.getContext();
+                        if (ConfigManager.shouldApplyDeXTaskbar(context)) {
+                            int curLeft = lc.getLeft();
+                            int targetLeft = dp(context, 8);
+                            if (curLeft > targetLeft) {
+                                lc.setTranslationX(targetLeft - curLeft);
+                            } else {
+                                lc.setTranslationX(0f);
+                            }
+                        } else {
+                            lc.setTranslationX(0f);
+                        }
+                    }
+                }
+            });
+            XposedBridge.log(TAG + "HotSeatsListContent hooked");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Failed hooking HotSeatsListContent: " + t);
+        }
+    }
+
+    private static void hookDeviceConfig(XC_LoadPackage.LoadPackageParam lpparam) {
+        try {
+            Class<?> devConfigCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.DeviceConfig", lpparam.classLoader);
+            if (devConfigCls == null) return;
+
+            XposedBridge.hookAllMethods(devConfigCls, "getHotSeatsPaddingLeft", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    param.setResult(0);
+                }
+            });
+            XposedBridge.log(TAG + "DeviceConfig hooked");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Failed hooking DeviceConfig: " + t);
         }
     }
 
