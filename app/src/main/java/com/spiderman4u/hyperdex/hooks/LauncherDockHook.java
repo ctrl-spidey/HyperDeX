@@ -12,11 +12,17 @@ import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
+import android.widget.FrameLayout;
 
+import com.spiderman4u.hyperdex.R;
 import com.spiderman4u.hyperdex.config.ConfigManager;
 import com.spiderman4u.hyperdex.config.Constants;
+import com.spiderman4u.hyperdex.views.DeXSystemTrayView;
 
 import java.lang.reflect.Field;
 
@@ -162,7 +168,32 @@ public class LauncherDockHook {
                     }
                 });
 
-                // 2. Hook updateRoundRect and updateBackgroundSize to force GONE and alpha 0
+                // 2. Hook setVisibility and setAlpha - keep GONE and alpha 0
+                XposedBridge.hookAllMethods(cls, "setVisibility", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                param.args[0] = View.GONE;
+                            }
+                        }
+                    }
+                });
+
+                XposedBridge.hookAllMethods(cls, "setAlpha", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                param.args[0] = 0f;
+                            }
+                        }
+                    }
+                });
+
+                // 3. Hook updateRoundRect and updateBackgroundSize
                 XposedBridge.hookAllMethods(cls, "updateRoundRect", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -171,6 +202,7 @@ public class LauncherDockHook {
                             if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
                                 v.setVisibility(View.GONE);
                                 v.setAlpha(0f);
+                                v.setBackground(null);
                             }
                         }
                     }
@@ -184,12 +216,13 @@ public class LauncherDockHook {
                             if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
                                 v.setVisibility(View.GONE);
                                 v.setAlpha(0f);
+                                v.setBackground(null);
                             }
                         }
                     }
                 });
 
-                // 3. Hook onMeasure
+                // 4. Hook onMeasure
                 XposedBridge.hookAllMethods(cls, "onMeasure", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -198,6 +231,7 @@ public class LauncherDockHook {
                             if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
                                 v.setVisibility(View.GONE);
                                 v.setAlpha(0f);
+                                v.setBackground(null);
                             }
                         }
                     }
@@ -227,6 +261,10 @@ public class LauncherDockHook {
 
     private static void applyDeXStyle(Object hotSeatsObj) {
         try {
+            if (!(hotSeatsObj instanceof View)) return;
+            View hotSeatsView = (View) hotSeatsObj;
+            Context context = hotSeatsView.getContext();
+
             // 1. Force outer container layout params to full width
             Field bgParamField = XposedHelpers.findFieldIfExists(hotSeatsObj.getClass(), "mBackgroundLayoutParam");
             if (bgParamField != null) {
@@ -255,9 +293,10 @@ public class LauncherDockHook {
                 }
             }
 
-            // 3. Set the solid full-width Samsung DeX acrylic taskbar background on HotSeats view
-            if (hotSeatsObj instanceof View) {
-                View hotSeatsView = (View) hotSeatsObj;
+            // 3. Set the solid full-width Samsung DeX acrylic taskbar background on inline_dock_container
+            ViewParent parent = hotSeatsView.getParent();
+            if (parent instanceof ViewGroup) {
+                ViewGroup dockContainer = (ViewGroup) parent;
 
                 GradientDrawable topBorder = new GradientDrawable();
                 topBorder.setColor(Color.parseColor("#26FFFFFF")); // 15% white subtle top border
@@ -269,8 +308,28 @@ public class LauncherDockHook {
                 LayerDrawable layerDrawable = new LayerDrawable(new GradientDrawable[]{topBorder, dexFill});
                 layerDrawable.setLayerInset(1, 0, 1, 0, 0); // 1px border
 
-                hotSeatsView.setBackground(layerDrawable);
+                dockContainer.setBackground(layerDrawable);
+
+                // 4. Add Samsung DeX System Tray View to bottom-right
+                View existingTray = dockContainer.findViewById(R.id.dex_system_tray);
+                if (existingTray == null) {
+                    DeXSystemTrayView tray = new DeXSystemTrayView(context);
+                    tray.setId(R.id.dex_system_tray);
+                    FrameLayout.LayoutParams lpTray = new FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                    );
+                    lpTray.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+                    lpTray.rightMargin = dp(context, 8);
+                    dockContainer.addView(tray, lpTray);
+                } else {
+                    existingTray.setVisibility(View.VISIBLE);
+                }
             }
+
+            // Clear any background on hotSeatsView itself so dockContainer background shines through
+            hotSeatsView.setBackground(null);
+
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Error in applyDeXStyle: " + t.getMessage());
         }
@@ -278,6 +337,22 @@ public class LauncherDockHook {
 
     private static void restoreWorkstationStyle(Object hotSeatsObj) {
         try {
+            if (!(hotSeatsObj instanceof View)) return;
+            View hotSeatsView = (View) hotSeatsObj;
+
+            // Remove DeX background from inline_dock_container
+            ViewParent parent = hotSeatsView.getParent();
+            if (parent instanceof ViewGroup) {
+                ViewGroup dockContainer = (ViewGroup) parent;
+                dockContainer.setBackground(null);
+
+                // Hide System Tray
+                View existingTray = dockContainer.findViewById(R.id.dex_system_tray);
+                if (existingTray != null) {
+                    existingTray.setVisibility(View.GONE);
+                }
+            }
+
             // Restore inner pill background visibility
             showBackgroundField(hotSeatsObj, "mBlurBackground");
             showBackgroundField(hotSeatsObj, "mBlurBackground2");
@@ -289,10 +364,7 @@ public class LauncherDockHook {
                 showBackgroundField(listContent, "mContentBackground");
             }
 
-            // Clear the outer DeX background
-            if (hotSeatsObj instanceof View) {
-                ((View) hotSeatsObj).setBackground(null);
-            }
+            hotSeatsView.setBackground(null);
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Error in restoreWorkstationStyle: " + t.getMessage());
         }
@@ -305,6 +377,7 @@ public class LauncherDockHook {
                 View v = (View) val;
                 v.setVisibility(View.GONE);
                 v.setAlpha(0f);
+                v.setBackground(null);
             }
         } catch (Throwable ignored) {
         }
@@ -378,5 +451,9 @@ public class LauncherDockHook {
             v.requestLayout();
             v.invalidate();
         }
+    }
+
+    private static int dp(Context context, int val) {
+        return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, val, context.getResources().getDisplayMetrics());
     }
 }

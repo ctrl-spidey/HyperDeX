@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="dex_system_tray" type="id" />
+    <item name="dex_window_title" type="id" />
+    <item name="dex_btn_minimize" type="id" />
+    <item name="dex_btn_maximize" type="id" />
+    <item name="dex_btn_close" type="id" />
+</resources>
