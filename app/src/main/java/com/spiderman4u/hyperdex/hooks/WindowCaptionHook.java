@@ -14,14 +14,17 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageButton;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.spiderman4u.hyperdex.R;
 import com.spiderman4u.hyperdex.config.ConfigManager;
 
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -31,7 +34,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class WindowCaptionHook {
 
     private static final String TAG = "[HyperDeX-Caption] ";
-    private static View sStatusBarView = null;
+    private static final List<WeakReference<View>> sStatusBarViews = new ArrayList<>();
     private static boolean sStatusBarObserverRegistered = false;
 
     public static void init(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -118,50 +121,133 @@ public class WindowCaptionHook {
     }
 
     private static void hookStatusBar(XC_LoadPackage.LoadPackageParam lpparam) {
-        try {
-            Class<?> statusBarCls = XposedHelpers.findClassIfExists(
-                    "com.android.systemui.statusbar.phone.PhoneStatusBarView",
-                    lpparam.classLoader
-            );
+        String[] statusBarClassNames = new String[] {
+            "com.android.systemui.statusbar.phone.PhoneStatusBarView",
+            "com.android.systemui.statusbar.phone.MiuiPhoneStatusBarView",
+            "com.android.systemui.statusbar.window.StatusBarWindowView"
+        };
 
-            if (statusBarCls == null) return;
+        for (String className : statusBarClassNames) {
+            try {
+                Class<?> cls = XposedHelpers.findClassIfExists(className, lpparam.classLoader);
+                if (cls == null) continue;
 
-            XposedBridge.hookAllMethods(statusBarCls, "onAttachedToWindow", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.thisObject instanceof View) {
-                        sStatusBarView = (View) param.thisObject;
-                        Context context = sStatusBarView.getContext();
-                        registerStatusBarObserver(context);
-                        updateStatusBarVisibility(sStatusBarView, context);
-                    }
-                }
-            });
-
-            XposedBridge.hookAllMethods(statusBarCls, "setVisibility", new XC_MethodHook() {
-                @Override
-                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    if (param.thisObject instanceof View) {
-                        View v = (View) param.thisObject;
-                        if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
-                            param.args[0] = View.GONE;
+                // 1. Hook onAttachedToWindow
+                XposedBridge.hookAllMethods(cls, "onAttachedToWindow", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            registerStatusBarView(v);
+                            registerStatusBarObserver(v.getContext());
+                            updateStatusBarView(v);
                         }
                     }
-                }
-            });
+                });
 
-            XposedBridge.log(TAG + "PhoneStatusBarView hooked successfully");
+                // 2. Hook onMeasure - suppress dimensions when DeX active
+                XposedBridge.hookAllMethods(cls, "onMeasure", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                v.setVisibility(View.GONE);
+                                v.setAlpha(0f);
+                                XposedHelpers.callMethod(param.thisObject, "setMeasuredDimension", 0, 0);
+                                param.setResult(null);
+                            }
+                        }
+                    }
+                });
+
+                // 3. Hook draw and onDraw - block canvas rendering
+                XposedBridge.hookAllMethods(cls, "draw", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                param.setResult(null);
+                            }
+                        }
+                    }
+                });
+
+                XposedBridge.hookAllMethods(cls, "onDraw", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                param.setResult(null);
+                            }
+                        }
+                    }
+                });
+
+                XposedBridge.log(TAG + "StatusBar class hooked: " + className);
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "Failed hooking statusBar class " + className + ": " + t);
+            }
+        }
+
+        // Hook StatusBarWindowControllerImpl.apply to keep status bar window hidden
+        try {
+            Class<?> ctrlCls = XposedHelpers.findClassIfExists("com.android.systemui.statusbar.window.StatusBarWindowControllerImpl", lpparam.classLoader);
+            if (ctrlCls != null) {
+                XposedBridge.hookAllMethods(ctrlCls, "apply", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        try {
+                            View sbView = (View) XposedHelpers.getObjectField(param.thisObject, "mStatusBarView");
+                            if (sbView != null && ConfigManager.shouldApplyDeXTaskbar(sbView.getContext())) {
+                                sbView.setVisibility(View.GONE);
+                                sbView.setAlpha(0f);
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                });
+                XposedBridge.log(TAG + "StatusBarWindowControllerImpl.apply hooked");
+            }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "Failed hooking PhoneStatusBarView: " + t);
+            XposedBridge.log(TAG + "Failed hooking StatusBarWindowControllerImpl: " + t);
         }
     }
 
-    private static void updateStatusBarVisibility(View statusBar, Context context) {
-        try {
-            if (statusBar == null || context == null) return;
-            boolean shouldHide = ConfigManager.shouldApplyDeXTaskbar(context);
-            statusBar.setVisibility(shouldHide ? View.GONE : View.VISIBLE);
-        } catch (Throwable ignored) {}
+    private static synchronized void registerStatusBarView(View v) {
+        if (v == null) return;
+        boolean exists = false;
+        for (WeakReference<View> ref : sStatusBarViews) {
+            if (ref.get() == v) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            sStatusBarViews.add(new WeakReference<>(v));
+        }
+    }
+
+    private static void updateStatusBarView(View v) {
+        if (v == null) return;
+        boolean shouldHide = ConfigManager.shouldApplyDeXTaskbar(v.getContext());
+        v.setVisibility(shouldHide ? View.GONE : View.VISIBLE);
+        v.setAlpha(shouldHide ? 0f : 1.0f);
+    }
+
+    private static synchronized void updateAllStatusBarViews() {
+        Iterator<WeakReference<View>> it = sStatusBarViews.iterator();
+        while (it.hasNext()) {
+            View v = it.next().get();
+            if (v == null) {
+                it.remove();
+            } else {
+                updateStatusBarView(v);
+                v.requestLayout();
+                v.invalidate();
+            }
+        }
     }
 
     private static void registerStatusBarObserver(Context context) {
@@ -171,9 +257,7 @@ public class WindowCaptionHook {
             context.getContentResolver().registerContentObserver(uriDkt, true, new ContentObserver(new Handler(Looper.getMainLooper())) {
                 @Override
                 public void onChange(boolean selfChange) {
-                    if (sStatusBarView != null) {
-                        updateStatusBarVisibility(sStatusBarView, sStatusBarView.getContext());
-                    }
+                    updateAllStatusBarViews();
                 }
             });
 
@@ -181,13 +265,12 @@ public class WindowCaptionHook {
             context.getContentResolver().registerContentObserver(uriGlobal, true, new ContentObserver(new Handler(Looper.getMainLooper())) {
                 @Override
                 public void onChange(boolean selfChange) {
-                    if (sStatusBarView != null) {
-                        updateStatusBarVisibility(sStatusBarView, sStatusBarView.getContext());
-                    }
+                    updateAllStatusBarViews();
                 }
             });
 
             sStatusBarObserverRegistered = true;
+            XposedBridge.log(TAG + "StatusBar observers registered");
         } catch (Throwable ignored) {}
     }
 

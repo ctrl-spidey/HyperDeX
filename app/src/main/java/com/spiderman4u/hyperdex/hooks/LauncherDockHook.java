@@ -18,6 +18,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 
 import com.spiderman4u.hyperdex.R;
 import com.spiderman4u.hyperdex.config.ConfigManager;
@@ -42,6 +43,7 @@ public class LauncherDockHook {
         hookLaptopDockController(lpparam);
         hookLaptopModeController(lpparam);
         hookBackgroundPillClasses(lpparam);
+        hookIconContainers(lpparam);
     }
 
     private static void hookHotSeats(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -143,7 +145,7 @@ public class LauncherDockHook {
                 Class<?> cls = XposedHelpers.findClassIfExists(className, lpparam.classLoader);
                 if (cls == null) continue;
 
-                // 1. Hook onDraw and draw - completely suppress canvas rendering of the white rounded pill
+                // 1. Hook onDraw and draw - suppress canvas rendering
                 XposedBridge.hookAllMethods(cls, "onDraw", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -168,7 +170,7 @@ public class LauncherDockHook {
                     }
                 });
 
-                // 2. Hook setVisibility and setAlpha - keep GONE and alpha 0
+                // 2. Hook setVisibility and setAlpha
                 XposedBridge.hookAllMethods(cls, "setVisibility", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -243,6 +245,95 @@ public class LauncherDockHook {
         }
     }
 
+    private static void hookIconContainers(XC_LoadPackage.LoadPackageParam lpparam) {
+        // 1. Hook FlexboxItemContainer to remove dark-grey rounded tile background behind each dock icon
+        try {
+            Class<?> flexboxCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.hotseats.FlexboxItemContainer", lpparam.classLoader);
+            if (flexboxCls != null) {
+                XposedBridge.hookAllMethods(flexboxCls, "onAttachedToWindow", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                stripBackgrounds(v);
+                            }
+                        }
+                    }
+                });
+
+                XposedBridge.hookAllMethods(flexboxCls, "setBackground", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                param.args[0] = null;
+                            }
+                        }
+                    }
+                });
+
+                XposedBridge.log(TAG + "FlexboxItemContainer hooked");
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Failed hooking FlexboxItemContainer: " + t);
+        }
+
+        // 2. Hook HotSeatsListContentAdapter to strip item backgrounds
+        try {
+            Class<?> adapterCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.hotseats.HotSeatsListContentAdapter", lpparam.classLoader);
+            if (adapterCls != null) {
+                XposedBridge.hookAllMethods(adapterCls, "onBindViewHolder", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object holder = param.args[0];
+                        if (holder != null) {
+                            View itemView = (View) XposedHelpers.getObjectField(holder, "itemView");
+                            if (itemView != null && ConfigManager.shouldApplyDeXTaskbar(itemView.getContext())) {
+                                stripBackgrounds(itemView);
+                            }
+                        }
+                    }
+                });
+
+                XposedBridge.hookAllMethods(adapterCls, "onViewAttachedToWindow", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object holder = param.args[0];
+                        if (holder != null) {
+                            View itemView = (View) XposedHelpers.getObjectField(holder, "itemView");
+                            if (itemView != null && ConfigManager.shouldApplyDeXTaskbar(itemView.getContext())) {
+                                stripBackgrounds(itemView);
+                            }
+                        }
+                    }
+                });
+
+                XposedBridge.log(TAG + "HotSeatsListContentAdapter hooked");
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Failed hooking HotSeatsListContentAdapter: " + t);
+        }
+    }
+
+    private static void stripBackgrounds(View v) {
+        if (v == null) return;
+        v.setBackground(null);
+        if (v instanceof ViewGroup) {
+            ViewGroup vg = (ViewGroup) v;
+            for (int i = 0; i < vg.getChildCount(); i++) {
+                View child = vg.getChildAt(i);
+                if (!(child instanceof ImageView)) {
+                    child.setBackground(null);
+                }
+                if (child instanceof ViewGroup) {
+                    stripBackgrounds(child);
+                }
+            }
+        }
+    }
+
     private static void applyDockLayout(Object hotSeatsObj, Context context) {
         try {
             if (hotSeatsObj == null || context == null) return;
@@ -265,7 +356,7 @@ public class LauncherDockHook {
             View hotSeatsView = (View) hotSeatsObj;
             Context context = hotSeatsView.getContext();
 
-            // 1. Force outer container layout params to full width
+            // 1. Force outer container layout params
             Field bgParamField = XposedHelpers.findFieldIfExists(hotSeatsObj.getClass(), "mBackgroundLayoutParam");
             if (bgParamField != null) {
                 Object paramObj = bgParamField.get(hotSeatsObj);
@@ -284,25 +375,48 @@ public class LauncherDockHook {
             hideBackgroundField(hotSeatsObj, "mNormalBackground");
             hideBackgroundField(hotSeatsObj, "mMiuiXBlurBackground");
 
-            // Also check list content background
             Object listContent = XposedHelpers.getObjectField(hotSeatsObj, "mListContent");
             if (listContent != null) {
                 hideBackgroundField(listContent, "mContentBackground");
                 if (listContent instanceof View) {
-                    ((View) listContent).setBackground(null);
+                    View listContentView = (View) listContent;
+                    listContentView.setBackground(null);
+
+                    // Align list content to START (Far Left)
+                    ViewGroup.LayoutParams listLp = listContentView.getLayoutParams();
+                    if (listLp instanceof FrameLayout.LayoutParams) {
+                        FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) listLp;
+                        flp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
+                        flp.leftMargin = 0;
+                        flp.rightMargin = 0;
+                        listContentView.setLayoutParams(flp);
+                    }
                 }
             }
 
-            // 3. Set the solid full-width Samsung DeX acrylic taskbar background on inline_dock_container
+            // 3. Align hotSeatsView to START (Far Left of taskbar)
+            ViewGroup.LayoutParams lp = hotSeatsView.getLayoutParams();
+            if (lp instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) lp;
+                flp.gravity = Gravity.START | Gravity.BOTTOM;
+                flp.leftMargin = dp(context, 8);
+                flp.rightMargin = 0;
+                flp.bottomMargin = 0;
+                hotSeatsView.setLayoutParams(flp);
+            }
+            hotSeatsView.setTranslationX(0f);
+            hotSeatsView.setBackground(null);
+
+            // 4. Set the solid full-width Samsung DeX acrylic taskbar background on inline_dock_container
             ViewParent parent = hotSeatsView.getParent();
             if (parent instanceof ViewGroup) {
                 ViewGroup dockContainer = (ViewGroup) parent;
 
                 GradientDrawable topBorder = new GradientDrawable();
-                topBorder.setColor(Color.parseColor("#26FFFFFF")); // 15% white subtle top border
+                topBorder.setColor(Color.parseColor("#33FFFFFF")); // Crisp 20% white top border
 
                 GradientDrawable dexFill = new GradientDrawable();
-                dexFill.setColor(Color.parseColor("#E6141518")); // Classic DeX 90% acrylic dark
+                dexFill.setColor(Color.parseColor("#F2141518")); // Classic DeX 95% acrylic onyx
                 dexFill.setCornerRadius(0); // Flat edge-to-edge
 
                 LayerDrawable layerDrawable = new LayerDrawable(new GradientDrawable[]{topBorder, dexFill});
@@ -310,25 +424,33 @@ public class LauncherDockHook {
 
                 dockContainer.setBackground(layerDrawable);
 
-                // 4. Add Samsung DeX System Tray View to bottom-right
+                // 5. Add/Update Samsung DeX System Tray View pinned strictly to bottom-right
+                int trayHeight = dp(context, 48);
                 View existingTray = dockContainer.findViewById(R.id.dex_system_tray);
                 if (existingTray == null) {
                     DeXSystemTrayView tray = new DeXSystemTrayView(context);
                     tray.setId(R.id.dex_system_tray);
                     FrameLayout.LayoutParams lpTray = new FrameLayout.LayoutParams(
                             ViewGroup.LayoutParams.WRAP_CONTENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
+                            trayHeight
                     );
-                    lpTray.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+                    lpTray.gravity = Gravity.END | Gravity.BOTTOM;
+                    lpTray.bottomMargin = 0;
                     lpTray.rightMargin = dp(context, 8);
                     dockContainer.addView(tray, lpTray);
                 } else {
                     existingTray.setVisibility(View.VISIBLE);
+                    ViewGroup.LayoutParams trayLp = existingTray.getLayoutParams();
+                    if (trayLp instanceof FrameLayout.LayoutParams) {
+                        FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) trayLp;
+                        flp.gravity = Gravity.END | Gravity.BOTTOM;
+                        flp.height = trayHeight;
+                        flp.bottomMargin = 0;
+                        flp.rightMargin = dp(context, 8);
+                        existingTray.setLayoutParams(flp);
+                    }
                 }
             }
-
-            // Clear any background on hotSeatsView itself so dockContainer background shines through
-            hotSeatsView.setBackground(null);
 
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Error in applyDeXStyle: " + t.getMessage());
@@ -353,6 +475,16 @@ public class LauncherDockHook {
                 }
             }
 
+            // Restore hotSeatsView layout gravity to CENTER_HORIZONTAL
+            ViewGroup.LayoutParams lp = hotSeatsView.getLayoutParams();
+            if (lp instanceof FrameLayout.LayoutParams) {
+                FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) lp;
+                flp.gravity = Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM;
+                flp.leftMargin = 0;
+                flp.rightMargin = 0;
+                hotSeatsView.setLayoutParams(flp);
+            }
+
             // Restore inner pill background visibility
             showBackgroundField(hotSeatsObj, "mBlurBackground");
             showBackgroundField(hotSeatsObj, "mBlurBackground2");
@@ -362,6 +494,16 @@ public class LauncherDockHook {
             Object listContent = XposedHelpers.getObjectField(hotSeatsObj, "mListContent");
             if (listContent != null) {
                 showBackgroundField(listContent, "mContentBackground");
+                if (listContent instanceof View) {
+                    View listContentView = (View) listContent;
+                    ViewGroup.LayoutParams listLp = listContentView.getLayoutParams();
+                    if (listLp instanceof FrameLayout.LayoutParams) {
+                        FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) listLp;
+                        flp.gravity = Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM;
+                        flp.leftMargin = 0;
+                        listContentView.setLayoutParams(flp);
+                    }
+                }
             }
 
             hotSeatsView.setBackground(null);
@@ -398,7 +540,6 @@ public class LauncherDockHook {
     private static void registerObserver(Context context) {
         if (sObserverRegistered || context == null) return;
         try {
-            // Observer for Settings.Global hyperdex_mode
             Uri uriGlobal = Settings.Global.getUriFor("hyperdex_mode");
             context.getContentResolver().registerContentObserver(uriGlobal, true, new ContentObserver(new Handler(Looper.getMainLooper())) {
                 @Override
@@ -408,7 +549,6 @@ public class LauncherDockHook {
                 }
             });
 
-            // Observer for Settings.Global hyperdex_apply_normal
             Uri uriNormal = Settings.Global.getUriFor("hyperdex_apply_normal");
             context.getContentResolver().registerContentObserver(uriNormal, true, new ContentObserver(new Handler(Looper.getMainLooper())) {
                 @Override
@@ -418,7 +558,6 @@ public class LauncherDockHook {
                 }
             });
 
-            // Observer for Settings.System miui_dkt_mode (HyperOS Workstation Mode)
             Uri uriDkt = Settings.System.getUriFor("miui_dkt_mode");
             context.getContentResolver().registerContentObserver(uriDkt, true, new ContentObserver(new Handler(Looper.getMainLooper())) {
                 @Override
@@ -428,7 +567,6 @@ public class LauncherDockHook {
                 }
             });
 
-            // Also register broadcast receiver as fallback
             IntentFilter filter = new IntentFilter(Constants.ACTION_MODE_CHANGED);
             context.registerReceiver(new BroadcastReceiver() {
                 @Override
