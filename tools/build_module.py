@@ -13,7 +13,7 @@ import shutil
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODULE_SRC = os.path.join(PROJECT_DIR, "module")
 RELEASE_DIR = os.path.join(PROJECT_DIR, "release")
-ZIP_NAME = "HyperDeX_v1.0.0.zip"
+ZIP_NAME = "HyperDeX_v1.0.1.zip"
 ZIP_OUTPUT = os.path.join(RELEASE_DIR, ZIP_NAME)
 SDCARD_DOWNLOAD = "/sdcard/Download"
 

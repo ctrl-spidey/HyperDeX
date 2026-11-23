@@ -31,6 +31,7 @@ APK_SRC="$MODPATH/app/HyperDeX.apk"
 if [ -f "$APK_SRC" ]; then
     ui_print "- Installing HyperDeX companion app..."
     pm install -r "$APK_SRC" >/dev/null 2>&1
+    pm grant com.spiderman4u.hyperdex android.permission.WRITE_SECURE_SETTINGS >/dev/null 2>&1
 fi
 
 # Enable in LSPosed / Vector if CLI is available

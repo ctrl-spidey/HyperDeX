@@ -2,82 +2,78 @@ package com.spiderman4u.hyperdex.config;
 
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
-import android.net.Uri;
-import android.os.Bundle;
+import android.provider.Settings;
 
-import de.robv.android.xposed.XSharedPreferences;
 import de.robv.android.xposed.XposedBridge;
 
 public class ConfigManager {
 
-    private static XSharedPreferences sXSharedPrefs;
+    private static final String SETTING_DEX_MODE = "hyperdex_mode";
+    private static final String SETTING_EDGE_TO_EDGE = "hyperdex_edge_to_edge";
+    private static final String SETTING_START_MENU = "hyperdex_start_menu";
+    private static final String SETTING_DEX_BUTTONS = "hyperdex_dex_buttons";
 
     public static boolean isDeXModeEnabled(Context context) {
-        return getBoolean(context, Constants.PREF_DEX_MODE_ENABLED, true);
+        return getGlobalSetting(context, SETTING_DEX_MODE, true);
     }
 
     public static boolean isEdgeToEdgeEnabled(Context context) {
-        return getBoolean(context, Constants.PREF_EDGE_TO_EDGE, true);
+        return getGlobalSetting(context, SETTING_EDGE_TO_EDGE, true);
     }
 
     public static boolean isStartMenuEnabled(Context context) {
-        return getBoolean(context, Constants.PREF_START_MENU, true);
+        return getGlobalSetting(context, SETTING_START_MENU, true);
     }
 
     public static boolean isDeXButtonsEnabled(Context context) {
-        return getBoolean(context, Constants.PREF_DEX_BUTTONS, true);
+        return getGlobalSetting(context, SETTING_DEX_BUTTONS, true);
     }
 
     public static void setDeXModeEnabled(Context context, boolean enabled) {
-        setBoolean(context, Constants.PREF_DEX_MODE_ENABLED, enabled);
-        // Broadcast mode change
-        Intent intent = new Intent(Constants.ACTION_MODE_CHANGED);
-        intent.putExtra(Constants.EXTRA_DEX_MODE, enabled);
-        context.sendBroadcast(intent);
+        setGlobalSetting(context, SETTING_DEX_MODE, enabled);
+        if (context != null) {
+            Intent intent = new Intent(Constants.ACTION_MODE_CHANGED);
+            intent.putExtra(Constants.EXTRA_DEX_MODE, enabled);
+            context.sendBroadcast(intent);
+        }
     }
 
     public static void setBoolean(Context context, String key, boolean value) {
-        if (context != null) {
-            SharedPreferences prefs = context.getSharedPreferences(Constants.PREF_FILE, Context.MODE_PRIVATE);
-            prefs.edit().putBoolean(key, value).apply();
-        }
+        String settingKey = mapKeyToSetting(key);
+        setGlobalSetting(context, settingKey, value);
     }
 
-    public static boolean getBoolean(Context context, String key, boolean defValue) {
-        // Try ContentProvider first if context is available (reliable cross-process)
+    private static String mapKeyToSetting(String prefKey) {
+        if (Constants.PREF_EDGE_TO_EDGE.equals(prefKey)) return SETTING_EDGE_TO_EDGE;
+        if (Constants.PREF_START_MENU.equals(prefKey)) return SETTING_START_MENU;
+        if (Constants.PREF_DEX_BUTTONS.equals(prefKey)) return SETTING_DEX_BUTTONS;
+        return SETTING_DEX_MODE;
+    }
+
+    private static boolean getGlobalSetting(Context context, String key, boolean defValue) {
         if (context != null) {
             try {
-                Uri uri = Uri.parse("content://" + Constants.AUTHORITY);
-                Bundle bundle = context.getContentResolver().call(uri, Constants.METHOD_GET_PREFS, null, null);
-                if (bundle != null && bundle.containsKey(key)) {
-                    return bundle.getBoolean(key, defValue);
-                }
-            } catch (Throwable ignored) {
-            }
-
-            try {
-                SharedPreferences prefs = context.getSharedPreferences(Constants.PREF_FILE, Context.MODE_PRIVATE);
-                if (prefs.contains(key)) {
-                    return prefs.getBoolean(key, defValue);
-                }
-            } catch (Throwable ignored) {
+                int val = Settings.Global.getInt(context.getContentResolver(), key, defValue ? 1 : 0);
+                return val == 1;
+            } catch (Throwable t) {
+                XposedBridge.log("[HyperDeX] Error reading Settings.Global: " + t.getMessage());
             }
         }
-
-        // Fallback to XSharedPreferences for Xposed hooks
-        try {
-            if (sXSharedPrefs == null) {
-                sXSharedPrefs = new XSharedPreferences(Constants.PACKAGE_NAME, Constants.PREF_FILE);
-                sXSharedPrefs.makeWorldReadable();
-            } else {
-                sXSharedPrefs.reload();
-            }
-            return sXSharedPrefs.getBoolean(key, defValue);
-        } catch (Throwable t) {
-            XposedBridge.log("[HyperDeX] Error reading XSharedPreferences: " + t.getMessage());
-        }
-
         return defValue;
+    }
+
+    private static void setGlobalSetting(Context context, String key, boolean value) {
+        if (context != null) {
+            try {
+                Settings.Global.putInt(context.getContentResolver(), key, value ? 1 : 0);
+            } catch (Throwable t) {
+                // If direct write fails, write via root
+                try {
+                    String cmd = "settings put global " + key + " " + (value ? "1" : "0");
+                    Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+                } catch (Throwable ignored) {
+                }
+            }
+        }
     }
 }

@@ -46,7 +46,7 @@ jobs:
           name: HyperDeX-Release
           path: |
             module/app/HyperDeX.apk
-            release/HyperDeX_v1.0.0.zip
+            release/HyperDeX_*.zip
             release/SHA256SUMS.txt
 
       - name: Create GitHub Release
@@ -55,6 +55,6 @@ jobs:
         with:
           files: |
             module/app/HyperDeX.apk
-            release/HyperDeX_v1.0.0.zip
+            release/HyperDeX_*.zip
             release/SHA256SUMS.txt
           generate_release_notes: true

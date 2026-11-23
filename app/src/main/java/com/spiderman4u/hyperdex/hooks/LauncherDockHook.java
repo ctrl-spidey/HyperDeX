@@ -4,18 +4,21 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.database.ContentObserver;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
+import android.net.Uri;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.FrameLayout;
 
 import com.spiderman4u.hyperdex.config.ConfigManager;
 import com.spiderman4u.hyperdex.config.Constants;
 
 import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -26,6 +29,7 @@ public class LauncherDockHook {
 
     private static final String TAG = "[HyperDeX-Dock] ";
     private static Object sCurrentHotSeatsInstance = null;
+    private static boolean sObserverRegistered = false;
 
     public static void init(XC_LoadPackage.LoadPackageParam lpparam) {
         hookHotSeats(lpparam);
@@ -40,7 +44,7 @@ public class LauncherDockHook {
                 return;
             }
 
-            // Hook onAttachedToWindow to register mode change receiver
+            // Hook onAttachedToWindow
             XposedBridge.hookAllMethods(hotSeatsCls, "onAttachedToWindow", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -48,18 +52,19 @@ public class LauncherDockHook {
                     if (param.thisObject instanceof View) {
                         View hotSeatsView = (View) param.thisObject;
                         Context context = hotSeatsView.getContext();
-                        registerModeReceiver(context);
-                        applyDeXTaskbarStyle(param.thisObject);
+                        registerObserver(context);
+                        applyDockLayout(param.thisObject, context);
                     }
                 }
             });
 
-            // Hook onMeasure to enforce edge-to-edge full width in DeX mode
+            // Hook onMeasure
             XposedBridge.hookAllMethods(hotSeatsCls, "onMeasure", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (isDeXActive()) {
-                        applyDeXTaskbarStyle(param.thisObject);
+                    if (param.thisObject instanceof View) {
+                        View v = (View) param.thisObject;
+                        applyDockLayout(param.thisObject, v.getContext());
                     }
                 }
             });
@@ -68,20 +73,9 @@ public class LauncherDockHook {
             XposedBridge.hookAllMethods(hotSeatsCls, "initBackground", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (isDeXActive()) {
-                        applyDeXTaskbarStyle(param.thisObject);
-                    }
-                }
-            });
-
-            // Hook updatePadding
-            XposedBridge.hookAllMethods(hotSeatsCls, "updatePadding", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (isDeXActive() && param.thisObject instanceof View) {
+                    if (param.thisObject instanceof View) {
                         View v = (View) param.thisObject;
-                        // Reduce bottom floating padding so taskbar is anchored flat to screen bottom
-                        v.setPadding(v.getPaddingLeft(), v.getPaddingTop(), v.getPaddingRight(), 0);
+                        applyDockLayout(param.thisObject, v.getContext());
                     }
                 }
             });
@@ -95,16 +89,14 @@ public class LauncherDockHook {
     private static void hookLaptopDockController(XC_LoadPackage.LoadPackageParam lpparam) {
         try {
             Class<?> dockCtrlCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.laptop.dockbar.LaptopDockController", lpparam.classLoader);
-            if (dockCtrlCls == null) {
-                XposedBridge.log(TAG + "Class LaptopDockController not found");
-                return;
-            }
+            if (dockCtrlCls == null) return;
 
             XposedBridge.hookAllMethods(dockCtrlCls, "showDockbar", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (isDeXActive() && sCurrentHotSeatsInstance != null) {
-                        applyDeXTaskbarStyle(sCurrentHotSeatsInstance);
+                    if (sCurrentHotSeatsInstance instanceof View) {
+                        View v = (View) sCurrentHotSeatsInstance;
+                        applyDockLayout(sCurrentHotSeatsInstance, v.getContext());
                     }
                 }
             });
@@ -115,16 +107,26 @@ public class LauncherDockHook {
         }
     }
 
-    private static void applyDeXTaskbarStyle(Object hotSeatsObj) {
+    private static void applyDockLayout(Object hotSeatsObj, Context context) {
         try {
-            if (hotSeatsObj == null) return;
+            if (hotSeatsObj == null || context == null) return;
 
-            // 1. Check if DeX mode & edge-to-edge option are active
-            if (!isDeXActive() || !ConfigManager.isEdgeToEdgeEnabled(null)) {
-                return;
+            boolean isDeX = ConfigManager.isDeXModeEnabled(context);
+            boolean edgeToEdge = ConfigManager.isEdgeToEdgeEnabled(context);
+
+            if (isDeX && edgeToEdge) {
+                applyDeXStyle(hotSeatsObj);
+            } else {
+                restoreWorkstationStyle(hotSeatsObj);
             }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Error applying dock layout: " + t.getMessage());
+        }
+    }
 
-            // 2. Adjust mBackgroundLayoutParam to MATCH_PARENT and 0 margins
+    private static void applyDeXStyle(Object hotSeatsObj) {
+        try {
+            // 1. Force outer container layout params to full width
             Field bgParamField = XposedHelpers.findFieldIfExists(hotSeatsObj.getClass(), "mBackgroundLayoutParam");
             if (bgParamField != null) {
                 Object paramObj = bgParamField.get(hotSeatsObj);
@@ -137,54 +139,121 @@ public class LauncherDockHook {
                 }
             }
 
-            // 3. Apply Samsung DeX dark acrylic styled background
+            // 2. Hide inner floating pill background views so they do not render on top of the taskbar
+            hideBackgroundField(hotSeatsObj, "mBlurBackground");
+            hideBackgroundField(hotSeatsObj, "mNormalBackground");
+            hideBackgroundField(hotSeatsObj, "mMiuiXBlurBackground");
+
+            // Also check list content background
+            Object listContent = XposedHelpers.getObjectField(hotSeatsObj, "mListContent");
+            if (listContent != null) {
+                hideBackgroundField(listContent, "mContentBackground");
+                if (listContent instanceof View) {
+                    ((View) listContent).setBackground(null);
+                }
+            }
+
+            // 3. Set the solid full-width Samsung DeX acrylic taskbar background on HotSeats view
             if (hotSeatsObj instanceof View) {
                 View hotSeatsView = (View) hotSeatsObj;
+
                 GradientDrawable topBorder = new GradientDrawable();
-                topBorder.setColor(Color.parseColor("#26FFFFFF")); // 15% white subtle divider
+                topBorder.setColor(Color.parseColor("#26FFFFFF")); // 15% white subtle top border
 
                 GradientDrawable dexFill = new GradientDrawable();
-                dexFill.setColor(Color.parseColor("#E6141518")); // DeX signature 90% acrylic dark
-                dexFill.setCornerRadius(0); // Flat edge-to-edge bottom
+                dexFill.setColor(Color.parseColor("#E6141518")); // Classic DeX 90% acrylic dark
+                dexFill.setCornerRadius(0); // Flat edge-to-edge
 
                 LayerDrawable layerDrawable = new LayerDrawable(new GradientDrawable[]{topBorder, dexFill});
-                layerDrawable.setLayerInset(1, 0, 1, 0, 0); // 1px top border line
+                layerDrawable.setLayerInset(1, 0, 1, 0, 0); // 1px border
 
                 hotSeatsView.setBackground(layerDrawable);
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "Error applying DeX Taskbar style: " + t.getMessage());
+            XposedBridge.log(TAG + "Error in applyDeXStyle: " + t.getMessage());
         }
     }
 
-    private static void registerModeReceiver(Context context) {
+    private static void restoreWorkstationStyle(Object hotSeatsObj) {
         try {
+            // Restore inner pill background visibility
+            showBackgroundField(hotSeatsObj, "mBlurBackground");
+            showBackgroundField(hotSeatsObj, "mNormalBackground");
+            showBackgroundField(hotSeatsObj, "mMiuiXBlurBackground");
+
+            Object listContent = XposedHelpers.getObjectField(hotSeatsObj, "mListContent");
+            if (listContent != null) {
+                showBackgroundField(listContent, "mContentBackground");
+            }
+
+            // Clear the outer DeX background
+            if (hotSeatsObj instanceof View) {
+                ((View) hotSeatsObj).setBackground(null);
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Error in restoreWorkstationStyle: " + t.getMessage());
+        }
+    }
+
+    private static void hideBackgroundField(Object target, String fieldName) {
+        try {
+            Object val = XposedHelpers.getObjectField(target, fieldName);
+            if (val instanceof View) {
+                View v = (View) val;
+                v.setVisibility(View.GONE);
+                v.setAlpha(0f);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void showBackgroundField(Object target, String fieldName) {
+        try {
+            Object val = XposedHelpers.getObjectField(target, fieldName);
+            if (val instanceof View) {
+                View v = (View) val;
+                v.setVisibility(View.VISIBLE);
+                v.setAlpha(1.0f);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void registerObserver(Context context) {
+        if (sObserverRegistered || context == null) return;
+        try {
+            Uri uri = Settings.Global.getUriFor("hyperdex_mode");
+            context.getContentResolver().registerContentObserver(uri, true, new ContentObserver(new Handler(Looper.getMainLooper())) {
+                @Override
+                public void onChange(boolean selfChange) {
+                    XposedBridge.log(TAG + "Settings.Global hyperdex_mode changed");
+                    if (sCurrentHotSeatsInstance instanceof View) {
+                        View v = (View) sCurrentHotSeatsInstance;
+                        applyDockLayout(sCurrentHotSeatsInstance, v.getContext());
+                        v.requestLayout();
+                        v.invalidate();
+                    }
+                }
+            });
+
+            // Also register broadcast receiver as fallback
             IntentFilter filter = new IntentFilter(Constants.ACTION_MODE_CHANGED);
             context.registerReceiver(new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context ctx, Intent intent) {
-                    XposedBridge.log(TAG + "Received ACTION_MODE_CHANGED");
                     if (sCurrentHotSeatsInstance instanceof View) {
                         View v = (View) sCurrentHotSeatsInstance;
-                        v.post(() -> {
-                            if (isDeXActive()) {
-                                applyDeXTaskbarStyle(sCurrentHotSeatsInstance);
-                            } else {
-                                // Reset to stock workstation dock styling
-                                v.setBackground(null);
-                            }
-                            v.requestLayout();
-                            v.invalidate();
-                        });
+                        applyDockLayout(sCurrentHotSeatsInstance, v.getContext());
+                        v.requestLayout();
+                        v.invalidate();
                     }
                 }
             }, filter, Context.RECEIVER_EXPORTED);
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "Error registering mode receiver: " + t);
-        }
-    }
 
-    private static boolean isDeXActive() {
-        return ConfigManager.isDeXModeEnabled(null);
+            sObserverRegistered = true;
+            XposedBridge.log(TAG + "Observer and receiver registered successfully");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Error registering observer: " + t);
+        }
     }
 }
