@@ -36,7 +36,7 @@
 
         <!-- Quick Settings Tile for One-Tap Mode Switching -->
         <service
-            android:name=".ui.TileService"
+            android:name=".ui.HyperDeXTileService"
             android:exported="true"
             android:icon="@drawable/ic_dex_start"
             android:label="HyperDeX Mode"

@@ -5,7 +5,7 @@ import android.service.quicksettings.TileService;
 
 import com.spiderman4u.hyperdex.config.ConfigManager;
 
-public class TileService extends android.service.quicksettings.TileService {
+public class HyperDeXTileService extends TileService {
 
     @Override
     public void onStartListening() {
