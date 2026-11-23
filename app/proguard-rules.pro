@@ -1,0 +1,3 @@
+-keep class com.spiderman4u.hyperdex.** { *; }
+-keepclassmembers class com.spiderman4u.hyperdex.** { *; }
+-dontwarn de.robv.android.xposed.**

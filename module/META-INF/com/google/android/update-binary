@@ -1,0 +1,25 @@
+#!/sbin/sh
+#################
+# Magisk Module Package
+#################
+
+OUTFD=$2
+ZIPFILE=$3
+
+ui_print() {
+  echo "$1"
+}
+
+set_perm() {
+  chown $2:$3 "$1"
+  chmod $4 "$1"
+}
+
+set_perm_recursive() {
+  find "$1" -type d -exec chmod $4 {} +
+  find "$1" -type f -exec chmod $5 {} +
+  chown -R $2:$3 "$1"
+}
+
+# Standard Magisk / KernelSU loader
+exec /bin/sh "$0" "$@"

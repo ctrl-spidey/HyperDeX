@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Outer Rounded Squircle -->
+    <path
+        android:fillColor="#1C1E24"
+        android:pathData="M12,4h24c4.42,0 8,3.58 8,8v24c0,4.42 -3.58,8 -8,8H12c-4.42,0 -8,-3.58 -8,-8V12c0,-4.42 3.58,-8 8,-8z" />
+    <!-- Gradient accent inner stroke -->
+    <path
+        android:strokeColor="#2176FF"
+        android:strokeWidth="2"
+        android:pathData="M12,6h24c3.31,0 6,2.69 6,6v24c0,3.31 -2.69,6 -6,6H12c-3.31,0 -6,-2.69 -6,-6V12c0,-3.31 2.69,-6 6,-6z" />
+    <!-- DeX Desktop Screen Line -->
+    <path
+        android:fillColor="#00D2FF"
+        android:pathData="M14,14h20c1.1,0 2,0.9 2,2v12c0,1.1 -0.9,2 -2,2H14c-1.1,0 -2,-0.9 -2,-2V16c0,-1.1 0.9,-2 2,-2z" />
+    <!-- Bottom Taskbar Dot Line -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M14,32h4v2h-4z M20,32h8v2h-8z M30,32h4v2h-4z" />
+</vector>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<scope>
+    <package>com.miui.home</package>
+    <package>com.android.systemui</package>
+    <package>android</package>
+</scope>

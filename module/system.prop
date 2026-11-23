@@ -1,0 +1,3 @@
+# HyperDeX System Properties
+persist.sys.hyperdex.enabled=1
+persist.sys.hyperdex.version=1.0.0

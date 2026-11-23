@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:allowBackup="true"
+        android:icon="@drawable/ic_hyperdex_logo"
+        android:label="@string/app_name"
+        android:roundIcon="@drawable/ic_hyperdex_logo"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.HyperDeX">
+
+        <!-- Xposed Module Metadata -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="Samsung Classic DeX &amp; Dual Workstation Mode for HyperOS Tablets" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="82" />
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@xml/xposed_scope" />
+
+        <!-- Main Configuration Activity -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Quick Settings Tile for One-Tap Mode Switching -->
+        <service
+            android:name=".ui.TileService"
+            android:exported="true"
+            android:icon="@drawable/ic_dex_start"
+            android:label="HyperDeX Mode"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- Broadcast Receiver for Live Switching -->
+        <receiver
+            android:name=".receiver.ModeToggleReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.spiderman4u.hyperdex.ACTION_TOGGLE_MODE" />
+                <action android:name="com.spiderman4u.hyperdex.ACTION_SET_MODE" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Preferences Content Provider for Xposed Hook Access -->
+        <provider
+            android:name=".config.HyperDeXProvider"
+            android:authorities="com.spiderman4u.hyperdex.provider"
+            android:exported="true"
+            tools:ignore="ExportedContentProvider" />
+
+    </application>
+
+</manifest>

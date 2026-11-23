@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HyperDeX</string>
+    <string name="app_subtitle">Samsung Classic DeX &amp; Dual Workstation Engine</string>
+    
+    <string name="title_active_mode">Operating Mode</string>
+    <string name="desc_mode_dex">Classic Samsung DeX style active (Edge-to-edge taskbar, 9-dot Start menu, PC window controls)</string>
+    <string name="desc_mode_workstation">Stock Xiaomi HyperOS Workstation Mode active (Floating dock, gesture navigation, standard pill)</string>
+    
+    <string name="title_taskbar_opts">Taskbar &amp; Dock Customization</string>
+    <string name="opt_edge_to_edge">Edge-to-Edge Taskbar</string>
+    <string name="opt_edge_to_edge_desc">Expand dock to 100% width and remove rounded pill margins</string>
+    <string name="opt_start_menu">Samsung 9-Dot Start Button</string>
+    <string name="opt_start_menu_desc">Anchor app drawer button to bottom-left with DeX grid icon</string>
+    
+    <string name="title_window_opts">Window Management</string>
+    <string name="opt_dex_buttons">Classic Window Controls</string>
+    <string name="opt_dex_buttons_desc">Display Minimize [ — ], Maximize [ □ ], and Close [ ✕ ] in window titlebars</string>
+    <string name="opt_show_app_title">Show App Title &amp; Icon</string>
+    <string name="opt_show_app_title_desc">Display application name and icon on the left of window caption</string>
+    
+    <string name="title_actions">System Actions</string>
+    <string name="btn_restart_launcher">Restart Launcher &amp; Apply</string>
+    <string name="btn_restart_launcher_desc">Safely restarts Launcher to apply taskbar changes instantly</string>
+    <string name="toast_restarted">Launcher refreshed successfully!</string>
+    <string name="qs_tile_dex">DeX Mode</string>
+    <string name="qs_tile_workstation">Workstation</string>
+</resources>
