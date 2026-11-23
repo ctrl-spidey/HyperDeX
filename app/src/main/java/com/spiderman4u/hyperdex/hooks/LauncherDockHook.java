@@ -42,8 +42,10 @@ public class LauncherDockHook {
         hookHotSeats(lpparam);
         hookLaptopDockController(lpparam);
         hookLaptopModeController(lpparam);
+        hookDockContainerViews(lpparam);
         hookBackgroundPillClasses(lpparam);
         hookIconContainers(lpparam);
+        hookCellBackground(lpparam);
     }
 
     private static void hookHotSeats(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -86,6 +88,26 @@ public class LauncherDockHook {
                     if (param.thisObject instanceof View) {
                         View v = (View) param.thisObject;
                         applyDockLayout(param.thisObject, v.getContext());
+                    }
+                }
+            });
+
+            // Hook onLayout to force far-left alignment via translationX if centered
+            XposedBridge.hookAllMethods(hotSeatsCls, "onLayout", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.thisObject instanceof View) {
+                        View v = (View) param.thisObject;
+                        Context context = v.getContext();
+                        if (ConfigManager.shouldApplyDeXTaskbar(context)) {
+                            int leftPos = v.getLeft();
+                            int targetLeft = dp(context, 12);
+                            if (leftPos > targetLeft) {
+                                v.setTranslationX(targetLeft - leftPos);
+                            }
+                        } else {
+                            v.setTranslationX(0f);
+                        }
                     }
                 }
             });
@@ -317,14 +339,129 @@ public class LauncherDockHook {
         }
     }
 
+    private static void hookDockContainerViews(XC_LoadPackage.LoadPackageParam lpparam) {
+        String[] containerClasses = new String[] {
+            "com.miui.home.launcher.laptop.dockbar.DockContainerView",
+            "com.miui.home.launcher.dock.DockContainerView"
+        };
+
+        for (String className : containerClasses) {
+            try {
+                Class<?> cls = XposedHelpers.findClassIfExists(className, lpparam.classLoader);
+                if (cls == null) continue;
+
+                XposedBridge.hookAllMethods(cls, "attachHotSeats", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args.length > 0 && param.args[0] instanceof View) {
+                            View hotSeats = (View) param.args[0];
+                            applyDockLayout(hotSeats, hotSeats.getContext());
+                        }
+                    }
+                });
+
+                XposedBridge.hookAllMethods(cls, "onAttachedToWindow", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof ViewGroup) {
+                            ViewGroup container = (ViewGroup) param.thisObject;
+                            Context context = container.getContext();
+                            if (ConfigManager.shouldApplyDeXTaskbar(context)) {
+                                applyDockContainerDeXStyle(container, context);
+                            }
+                        }
+                    }
+                });
+
+                XposedBridge.log(TAG + "DockContainerView hooked: " + className);
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "Failed hooking " + className + ": " + t);
+            }
+        }
+    }
+
+    private static void hookCellBackground(XC_LoadPackage.LoadPackageParam lpparam) {
+        try {
+            Class<?> cellBgCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.CellBackground", lpparam.classLoader);
+            if (cellBgCls == null) return;
+
+            XposedBridge.hookAllMethods(cellBgCls, "onDraw", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.thisObject instanceof View) {
+                        View v = (View) param.thisObject;
+                        if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                            param.setResult(null);
+                        }
+                    }
+                }
+            });
+
+            XposedBridge.hookAllMethods(cellBgCls, "draw", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.thisObject instanceof View) {
+                        View v = (View) param.thisObject;
+                        if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                            param.setResult(null);
+                        }
+                    }
+                }
+            });
+
+            XposedBridge.hookAllMethods(cellBgCls, "setVisibility", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.thisObject instanceof View) {
+                        View v = (View) param.thisObject;
+                        if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                            param.args[0] = View.GONE;
+                        }
+                    }
+                }
+            });
+
+            XposedBridge.hookAllMethods(cellBgCls, "setAlpha", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.thisObject instanceof View) {
+                        View v = (View) param.thisObject;
+                        if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                            param.args[0] = 0f;
+                        }
+                    }
+                }
+            });
+
+            XposedBridge.log(TAG + "CellBackground hooked");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Failed hooking CellBackground: " + t);
+        }
+    }
+
     private static void stripBackgrounds(View v) {
         if (v == null) return;
+        String clsName = v.getClass().getName();
+        if (clsName.contains("CellBackground")) {
+            v.setVisibility(View.GONE);
+            v.setAlpha(0f);
+            if (v instanceof ImageView) {
+                ((ImageView) v).setImageDrawable(null);
+            }
+            return;
+        }
         v.setBackground(null);
         if (v instanceof ViewGroup) {
             ViewGroup vg = (ViewGroup) v;
             for (int i = 0; i < vg.getChildCount(); i++) {
                 View child = vg.getChildAt(i);
-                if (!(child instanceof ImageView)) {
+                if (child.getClass().getName().contains("CellBackground")) {
+                    child.setVisibility(View.GONE);
+                    child.setAlpha(0f);
+                    if (child instanceof ImageView) {
+                        ((ImageView) child).setImageDrawable(null);
+                    }
+                } else if (!(child instanceof ImageView)) {
                     child.setBackground(null);
                 }
                 if (child instanceof ViewGroup) {
@@ -405,52 +542,65 @@ public class LauncherDockHook {
                 hotSeatsView.setLayoutParams(flp);
             }
             hotSeatsView.setTranslationX(0f);
+            hotSeatsView.setTranslationX(0f);
             hotSeatsView.setBackground(null);
 
-            // 4. Set the solid full-width Samsung DeX acrylic taskbar background on inline_dock_container
+            // 4. Set the solid full-width Samsung DeX acrylic taskbar background on parent dock container
             ViewParent parent = hotSeatsView.getParent();
             if (parent instanceof ViewGroup) {
-                ViewGroup dockContainer = (ViewGroup) parent;
+                applyDockContainerDeXStyle((ViewGroup) parent, context);
+            }
 
-                GradientDrawable topBorder = new GradientDrawable();
-                topBorder.setColor(Color.parseColor("#33FFFFFF")); // Crisp 20% white top border
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Error in applyDeXStyle: " + t.getMessage());
+        }
+    }
 
-                GradientDrawable dexFill = new GradientDrawable();
-                dexFill.setColor(Color.parseColor("#F2141518")); // Classic DeX 95% acrylic onyx
-                dexFill.setCornerRadius(0); // Flat edge-to-edge
+    private static void applyDockContainerDeXStyle(ViewGroup dockContainer, Context context) {
+        if (dockContainer == null || context == null) return;
+        try {
+            GradientDrawable topBorder = new GradientDrawable();
+            topBorder.setColor(Color.parseColor("#33FFFFFF")); // Crisp 20% white top border
 
-                LayerDrawable layerDrawable = new LayerDrawable(new GradientDrawable[]{topBorder, dexFill});
-                layerDrawable.setLayerInset(1, 0, 1, 0, 0); // 1px border
+            GradientDrawable dexFill = new GradientDrawable();
+            dexFill.setColor(Color.parseColor("#F2141518")); // Classic DeX 95% acrylic onyx
+            dexFill.setCornerRadius(0); // Flat edge-to-edge
 
-                dockContainer.setBackground(layerDrawable);
+            LayerDrawable layerDrawable = new LayerDrawable(new GradientDrawable[]{topBorder, dexFill});
+            layerDrawable.setLayerInset(1, 0, 1, 0, 0); // 1px border
 
-                // 5. Add/Update Samsung DeX System Tray View pinned strictly to bottom-right
-                int trayHeight = dp(context, 48);
-                View existingTray = dockContainer.findViewById(R.id.dex_system_tray);
-                if (existingTray == null) {
-                    DeXSystemTrayView tray = new DeXSystemTrayView(context);
-                    tray.setId(R.id.dex_system_tray);
-                    FrameLayout.LayoutParams lpTray = new FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            trayHeight
-                    );
-                    lpTray.gravity = Gravity.END | Gravity.BOTTOM;
-                    lpTray.bottomMargin = 0;
-                    lpTray.rightMargin = dp(context, 8);
-                    dockContainer.addView(tray, lpTray);
-                } else {
-                    existingTray.setVisibility(View.VISIBLE);
-                    ViewGroup.LayoutParams trayLp = existingTray.getLayoutParams();
-                    if (trayLp instanceof FrameLayout.LayoutParams) {
-                        FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) trayLp;
-                        flp.gravity = Gravity.END | Gravity.BOTTOM;
-                        flp.height = trayHeight;
-                        flp.bottomMargin = 0;
-                        flp.rightMargin = dp(context, 8);
-                        existingTray.setLayoutParams(flp);
-                    }
+            dockContainer.setBackground(layerDrawable);
+
+            // Add/Update Samsung DeX System Tray View pinned strictly to bottom-right
+            int trayHeight = dp(context, 48);
+            View existingTray = dockContainer.findViewById(R.id.dex_system_tray);
+            if (existingTray == null) {
+                DeXSystemTrayView tray = new DeXSystemTrayView(context);
+                tray.setId(R.id.dex_system_tray);
+                FrameLayout.LayoutParams lpTray = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        trayHeight
+                );
+                lpTray.gravity = Gravity.END | Gravity.BOTTOM;
+                lpTray.bottomMargin = 0;
+                lpTray.rightMargin = dp(context, 8);
+                dockContainer.addView(tray, lpTray);
+            } else {
+                existingTray.setVisibility(View.VISIBLE);
+                ViewGroup.LayoutParams trayLp = existingTray.getLayoutParams();
+                if (trayLp instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) trayLp;
+                    flp.gravity = Gravity.END | Gravity.BOTTOM;
+                    flp.height = trayHeight;
+                    flp.bottomMargin = 0;
+                    flp.rightMargin = dp(context, 8);
+                    existingTray.setLayoutParams(flp);
                 }
             }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Error in applyDockContainerDeXStyle: " + t);
+        }
+    }
 
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Error in applyDeXStyle: " + t.getMessage());
@@ -484,6 +634,7 @@ public class LauncherDockHook {
                 flp.rightMargin = 0;
                 hotSeatsView.setLayoutParams(flp);
             }
+            hotSeatsView.setTranslationX(0f);
 
             // Restore inner pill background visibility
             showBackgroundField(hotSeatsObj, "mBlurBackground");
