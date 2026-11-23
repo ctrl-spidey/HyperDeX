@@ -16,9 +16,11 @@ public class MainActivity extends AppCompatActivity {
 
     private TextView tvModeTitle;
     private TextView tvModeDesc;
+    private TextView tvWorkstationStatus;
     private MaterialSwitch switchMainMode;
     private MaterialSwitch switchEdgeToEdge;
     private MaterialSwitch switchStartMenu;
+    private MaterialSwitch switchApplyNormal;
     private MaterialSwitch switchDexButtons;
     private MaterialButton btnRestart;
 
@@ -29,14 +31,22 @@ public class MainActivity extends AppCompatActivity {
 
         tvModeTitle = findViewById(R.id.tv_mode_title);
         tvModeDesc = findViewById(R.id.tv_mode_desc);
+        tvWorkstationStatus = findViewById(R.id.tv_workstation_status);
         switchMainMode = findViewById(R.id.switch_main_mode);
         switchEdgeToEdge = findViewById(R.id.switch_edge_to_edge);
         switchStartMenu = findViewById(R.id.switch_start_menu);
+        switchApplyNormal = findViewById(R.id.switch_apply_normal);
         switchDexButtons = findViewById(R.id.switch_dex_buttons);
         btnRestart = findViewById(R.id.btn_restart);
 
         loadPreferences();
         setupListeners();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        updateWorkstationStatus();
     }
 
     private void loadPreferences() {
@@ -46,9 +56,11 @@ public class MainActivity extends AppCompatActivity {
 
         switchEdgeToEdge.setChecked(ConfigManager.isEdgeToEdgeEnabled(this));
         switchStartMenu.setChecked(ConfigManager.isStartMenuEnabled(this));
+        switchApplyNormal.setChecked(ConfigManager.isApplyInNormalModeEnabled(this));
         switchDexButtons.setChecked(ConfigManager.isDeXButtonsEnabled(this));
 
         updateSubSwitchesEnabled(isDeX);
+        updateWorkstationStatus();
     }
 
     private void setupListeners() {
@@ -64,6 +76,10 @@ public class MainActivity extends AppCompatActivity {
 
         switchStartMenu.setOnCheckedChangeListener((btn, isChecked) -> {
             ConfigManager.setBoolean(this, Constants.PREF_START_MENU, isChecked);
+        });
+
+        switchApplyNormal.setOnCheckedChangeListener((btn, isChecked) -> {
+            ConfigManager.setBoolean(this, Constants.PREF_APPLY_NORMAL, isChecked);
         });
 
         switchDexButtons.setOnCheckedChangeListener((btn, isChecked) -> {
@@ -88,16 +104,29 @@ public class MainActivity extends AppCompatActivity {
     private void updateSubSwitchesEnabled(boolean isDeX) {
         switchEdgeToEdge.setEnabled(isDeX);
         switchStartMenu.setEnabled(isDeX);
+        switchApplyNormal.setEnabled(isDeX);
         switchDexButtons.setEnabled(isDeX);
+    }
+
+    private void updateWorkstationStatus() {
+        boolean isWorkstation = ConfigManager.isWorkstationMode(this);
+        if (isWorkstation) {
+            tvWorkstationStatus.setText(R.string.status_workstation_active);
+            tvWorkstationStatus.setTextColor(getColor(R.color.secondary));
+        } else {
+            tvWorkstationStatus.setText(R.string.status_workstation_inactive);
+            tvWorkstationStatus.setTextColor(getColor(R.color.text_secondary));
+        }
     }
 
     private void restartLauncher() {
         try {
-            Process process = Runtime.getRuntime().exec(new String[]{"su", "-c", "pkill -f com.miui.home"});
+            Process process = Runtime.getRuntime().exec(new String[]{"su", "-c", "pkill -f com.miui.home && pkill -f com.android.systemui"});
             process.waitFor();
             Toast.makeText(this, R.string.toast_restarted, Toast.LENGTH_SHORT).show();
+            updateWorkstationStatus();
         } catch (Exception e) {
-            Toast.makeText(this, "Could not restart launcher: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Could not restart: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 }

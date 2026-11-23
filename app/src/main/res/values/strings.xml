@@ -19,10 +19,17 @@
     <string name="opt_show_app_title">Show App Title &amp; Icon</string>
     <string name="opt_show_app_title_desc">Display application name and icon on the left of window caption</string>
     
+    <string name="title_workstation_status">Workstation Mode Integration</string>
+    <string name="status_workstation_active">HyperOS Workstation Mode: ACTIVE</string>
+    <string name="status_workstation_inactive">HyperOS Workstation Mode: INACTIVE (Normal Tablet Mode)</string>
+    <string name="desc_workstation_integration">When Workstation Mode is turned on in Control Center, HyperDeX automatically presents Samsung Classic DeX. When turned off, the stock tablet launcher is preserved.</string>
+    <string name="opt_apply_normal">Always Apply in Normal Mode</string>
+    <string name="opt_apply_normal_desc">Keep the edge-to-edge DeX taskbar active even in standard tablet launcher</string>
+    
     <string name="title_actions">System Actions</string>
-    <string name="btn_restart_launcher">Restart Launcher &amp; Apply</string>
-    <string name="btn_restart_launcher_desc">Safely restarts Launcher to apply taskbar changes instantly</string>
-    <string name="toast_restarted">Launcher refreshed successfully!</string>
+    <string name="btn_restart_launcher">Restart Launcher &amp; SystemUI</string>
+    <string name="btn_restart_launcher_desc">Safely reloads Launcher and SystemUI to apply all hooks instantly</string>
+    <string name="toast_restarted">Launcher &amp; SystemUI refreshed successfully!</string>
     <string name="qs_tile_dex">DeX Mode</string>
     <string name="qs_tile_workstation">Workstation</string>
 </resources>

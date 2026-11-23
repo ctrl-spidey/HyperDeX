@@ -13,6 +13,7 @@ public final class Constants {
     public static final String PREF_EDGE_TO_EDGE = "pref_edge_to_edge";
     public static final String PREF_START_MENU = "pref_start_menu";
     public static final String PREF_DEX_BUTTONS = "pref_dex_buttons";
+    public static final String PREF_APPLY_NORMAL = "pref_apply_normal";
 
     public static final String ACTION_MODE_CHANGED = "com.spiderman4u.hyperdex.ACTION_MODE_CHANGED";
     public static final String ACTION_TOGGLE_MODE = "com.spiderman4u.hyperdex.ACTION_TOGGLE_MODE";

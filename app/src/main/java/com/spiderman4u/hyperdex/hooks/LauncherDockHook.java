@@ -34,6 +34,8 @@ public class LauncherDockHook {
     public static void init(XC_LoadPackage.LoadPackageParam lpparam) {
         hookHotSeats(lpparam);
         hookLaptopDockController(lpparam);
+        hookLaptopModeController(lpparam);
+        hookBackgroundPillClasses(lpparam);
     }
 
     private static void hookHotSeats(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -94,10 +96,7 @@ public class LauncherDockHook {
             XposedBridge.hookAllMethods(dockCtrlCls, "showDockbar", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (sCurrentHotSeatsInstance instanceof View) {
-                        View v = (View) sCurrentHotSeatsInstance;
-                        applyDockLayout(sCurrentHotSeatsInstance, v.getContext());
-                    }
+                    refreshDock();
                 }
             });
 
@@ -107,14 +106,116 @@ public class LauncherDockHook {
         }
     }
 
+    private static void hookLaptopModeController(XC_LoadPackage.LoadPackageParam lpparam) {
+        try {
+            Class<?> ctrlCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.laptop.LaptopModeController", lpparam.classLoader);
+            if (ctrlCls == null) return;
+
+            XposedBridge.hookAllMethods(ctrlCls, "realExecuteLaptopMode", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    refreshDock();
+                }
+            });
+
+            XposedBridge.log(TAG + "LaptopModeController hooks applied");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Failed hooking LaptopModeController: " + t);
+        }
+    }
+
+    private static void hookBackgroundPillClasses(XC_LoadPackage.LoadPackageParam lpparam) {
+        String[] bgClasses = new String[] {
+            "com.miui.home.launcher.hotseats.HotSeatsListContentMiuiXBlurBackground",
+            "com.miui.home.launcher.hotseats.HotSeatsListContentNormalBackground",
+            "com.miui.home.launcher.hotseats.HotSeatsListContentBlurBackground",
+            "com.miui.home.launcher.hotseats.HotSeatsListContentBlurBackground2"
+        };
+
+        for (String className : bgClasses) {
+            try {
+                Class<?> cls = XposedHelpers.findClassIfExists(className, lpparam.classLoader);
+                if (cls == null) continue;
+
+                // 1. Hook onDraw and draw - completely suppress canvas rendering of the white rounded pill
+                XposedBridge.hookAllMethods(cls, "onDraw", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                param.setResult(null);
+                            }
+                        }
+                    }
+                });
+
+                XposedBridge.hookAllMethods(cls, "draw", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                param.setResult(null);
+                            }
+                        }
+                    }
+                });
+
+                // 2. Hook updateRoundRect and updateBackgroundSize to force GONE and alpha 0
+                XposedBridge.hookAllMethods(cls, "updateRoundRect", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                v.setVisibility(View.GONE);
+                                v.setAlpha(0f);
+                            }
+                        }
+                    }
+                });
+
+                XposedBridge.hookAllMethods(cls, "updateBackgroundSize", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                v.setVisibility(View.GONE);
+                                v.setAlpha(0f);
+                            }
+                        }
+                    }
+                });
+
+                // 3. Hook onMeasure
+                XposedBridge.hookAllMethods(cls, "onMeasure", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
+                                v.setVisibility(View.GONE);
+                                v.setAlpha(0f);
+                            }
+                        }
+                    }
+                });
+
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "Failed hooking background class " + className + ": " + t);
+            }
+        }
+    }
+
     private static void applyDockLayout(Object hotSeatsObj, Context context) {
         try {
             if (hotSeatsObj == null || context == null) return;
 
-            boolean isDeX = ConfigManager.isDeXModeEnabled(context);
-            boolean edgeToEdge = ConfigManager.isEdgeToEdgeEnabled(context);
+            boolean shouldDeX = ConfigManager.shouldApplyDeXTaskbar(context);
 
-            if (isDeX && edgeToEdge) {
+            if (shouldDeX) {
                 applyDeXStyle(hotSeatsObj);
             } else {
                 restoreWorkstationStyle(hotSeatsObj);
@@ -139,8 +240,9 @@ public class LauncherDockHook {
                 }
             }
 
-            // 2. Hide inner floating pill background views so they do not render on top of the taskbar
+            // 2. Hide inner floating pill background views
             hideBackgroundField(hotSeatsObj, "mBlurBackground");
+            hideBackgroundField(hotSeatsObj, "mBlurBackground2");
             hideBackgroundField(hotSeatsObj, "mNormalBackground");
             hideBackgroundField(hotSeatsObj, "mMiuiXBlurBackground");
 
@@ -178,6 +280,7 @@ public class LauncherDockHook {
         try {
             // Restore inner pill background visibility
             showBackgroundField(hotSeatsObj, "mBlurBackground");
+            showBackgroundField(hotSeatsObj, "mBlurBackground2");
             showBackgroundField(hotSeatsObj, "mNormalBackground");
             showBackgroundField(hotSeatsObj, "mMiuiXBlurBackground");
 
@@ -222,17 +325,33 @@ public class LauncherDockHook {
     private static void registerObserver(Context context) {
         if (sObserverRegistered || context == null) return;
         try {
-            Uri uri = Settings.Global.getUriFor("hyperdex_mode");
-            context.getContentResolver().registerContentObserver(uri, true, new ContentObserver(new Handler(Looper.getMainLooper())) {
+            // Observer for Settings.Global hyperdex_mode
+            Uri uriGlobal = Settings.Global.getUriFor("hyperdex_mode");
+            context.getContentResolver().registerContentObserver(uriGlobal, true, new ContentObserver(new Handler(Looper.getMainLooper())) {
                 @Override
                 public void onChange(boolean selfChange) {
                     XposedBridge.log(TAG + "Settings.Global hyperdex_mode changed");
-                    if (sCurrentHotSeatsInstance instanceof View) {
-                        View v = (View) sCurrentHotSeatsInstance;
-                        applyDockLayout(sCurrentHotSeatsInstance, v.getContext());
-                        v.requestLayout();
-                        v.invalidate();
-                    }
+                    refreshDock();
+                }
+            });
+
+            // Observer for Settings.Global hyperdex_apply_normal
+            Uri uriNormal = Settings.Global.getUriFor("hyperdex_apply_normal");
+            context.getContentResolver().registerContentObserver(uriNormal, true, new ContentObserver(new Handler(Looper.getMainLooper())) {
+                @Override
+                public void onChange(boolean selfChange) {
+                    XposedBridge.log(TAG + "Settings.Global hyperdex_apply_normal changed");
+                    refreshDock();
+                }
+            });
+
+            // Observer for Settings.System miui_dkt_mode (HyperOS Workstation Mode)
+            Uri uriDkt = Settings.System.getUriFor("miui_dkt_mode");
+            context.getContentResolver().registerContentObserver(uriDkt, true, new ContentObserver(new Handler(Looper.getMainLooper())) {
+                @Override
+                public void onChange(boolean selfChange) {
+                    XposedBridge.log(TAG + "Settings.System miui_dkt_mode changed");
+                    refreshDock();
                 }
             });
 
@@ -241,19 +360,23 @@ public class LauncherDockHook {
             context.registerReceiver(new BroadcastReceiver() {
                 @Override
                 public void onReceive(Context ctx, Intent intent) {
-                    if (sCurrentHotSeatsInstance instanceof View) {
-                        View v = (View) sCurrentHotSeatsInstance;
-                        applyDockLayout(sCurrentHotSeatsInstance, v.getContext());
-                        v.requestLayout();
-                        v.invalidate();
-                    }
+                    refreshDock();
                 }
             }, filter, Context.RECEIVER_EXPORTED);
 
             sObserverRegistered = true;
-            XposedBridge.log(TAG + "Observer and receiver registered successfully");
+            XposedBridge.log(TAG + "Observers and receiver registered successfully");
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Error registering observer: " + t);
+        }
+    }
+
+    private static void refreshDock() {
+        if (sCurrentHotSeatsInstance instanceof View) {
+            View v = (View) sCurrentHotSeatsInstance;
+            applyDockLayout(sCurrentHotSeatsInstance, v.getContext());
+            v.requestLayout();
+            v.invalidate();
         }
     }
 }

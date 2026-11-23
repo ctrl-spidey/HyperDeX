@@ -12,6 +12,7 @@ public class ConfigManager {
     private static final String SETTING_EDGE_TO_EDGE = "hyperdex_edge_to_edge";
     private static final String SETTING_START_MENU = "hyperdex_start_menu";
     private static final String SETTING_DEX_BUTTONS = "hyperdex_dex_buttons";
+    private static final String SETTING_APPLY_NORMAL = "hyperdex_apply_normal";
 
     public static boolean isDeXModeEnabled(Context context) {
         return getGlobalSetting(context, SETTING_DEX_MODE, true);
@@ -27,6 +28,30 @@ public class ConfigManager {
 
     public static boolean isDeXButtonsEnabled(Context context) {
         return getGlobalSetting(context, SETTING_DEX_BUTTONS, true);
+    }
+
+    public static boolean isApplyInNormalModeEnabled(Context context) {
+        return getGlobalSetting(context, SETTING_APPLY_NORMAL, false);
+    }
+
+    public static boolean isWorkstationMode(Context context) {
+        if (context == null) return false;
+        try {
+            return Settings.System.getInt(context.getContentResolver(), "miui_dkt_mode", 0) == 1;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    public static boolean shouldApplyDeXTaskbar(Context context) {
+        if (context == null) return false;
+        if (!isDeXModeEnabled(context) || !isEdgeToEdgeEnabled(context)) {
+            return false;
+        }
+        if (isApplyInNormalModeEnabled(context)) {
+            return true;
+        }
+        return isWorkstationMode(context);
     }
 
     public static void setDeXModeEnabled(Context context, boolean enabled) {
@@ -47,6 +72,7 @@ public class ConfigManager {
         if (Constants.PREF_EDGE_TO_EDGE.equals(prefKey)) return SETTING_EDGE_TO_EDGE;
         if (Constants.PREF_START_MENU.equals(prefKey)) return SETTING_START_MENU;
         if (Constants.PREF_DEX_BUTTONS.equals(prefKey)) return SETTING_DEX_BUTTONS;
+        if (Constants.PREF_APPLY_NORMAL.equals(prefKey)) return SETTING_APPLY_NORMAL;
         return SETTING_DEX_MODE;
     }
 
