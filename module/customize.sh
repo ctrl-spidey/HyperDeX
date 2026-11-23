@@ -33,12 +33,12 @@ if [ -f "$APK_SRC" ]; then
     pm install -r "$APK_SRC" >/dev/null 2>&1
 fi
 
-# Enable in LSPosed if CLI is available
+# Enable in LSPosed / Vector if CLI is available
 if [ -x "/data/adb/lspd/cli" ]; then
     ui_print "- Configuring LSPosed scope..."
-    /data/adb/lspd/cli module enable com.spiderman4u.hyperdex >/dev/null 2>&1
-    /data/adb/lspd/cli scope add com.spiderman4u.hyperdex com.miui.home >/dev/null 2>&1
-    /data/adb/lspd/cli scope add com.spiderman4u.hyperdex com.android.systemui >/dev/null 2>&1
+    /data/adb/lspd/cli modules enable com.spiderman4u.hyperdex >/dev/null 2>&1 || /data/adb/lspd/cli module enable com.spiderman4u.hyperdex >/dev/null 2>&1
+    /data/adb/lspd/cli scope add com.spiderman4u.hyperdex com.miui.home/0 >/dev/null 2>&1 || /data/adb/lspd/cli scope add com.spiderman4u.hyperdex com.miui.home >/dev/null 2>&1
+    /data/adb/lspd/cli scope add com.spiderman4u.hyperdex com.android.systemui/0 >/dev/null 2>&1 || /data/adb/lspd/cli scope add com.spiderman4u.hyperdex com.android.systemui >/dev/null 2>&1
 fi
 
 ui_print " "
