@@ -262,10 +262,15 @@ public class WindowCaptionHook {
                                     if (bounds == null || bounds.width() <= 0) {
                                         Object taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
                                         if (taskInfo != null) {
-                                            Configuration cfg = (Configuration) XposedHelpers.getObjectField(taskInfo, "configuration");
-                                            if (cfg != null) {
-                                                bounds = cfg.windowConfiguration.getBounds();
-                                            }
+                                            try {
+                                                Object cfg = XposedHelpers.getObjectField(taskInfo, "configuration");
+                                                if (cfg != null) {
+                                                    Object winCfg = XposedHelpers.getObjectField(cfg, "windowConfiguration");
+                                                    if (winCfg != null) {
+                                                        bounds = (Rect) XposedHelpers.callMethod(winCfg, "getBounds");
+                                                    }
+                                                }
+                                            } catch (Throwable ignored) {}
                                         }
                                     }
                                     if (bounds != null && bounds.width() > 0) {
