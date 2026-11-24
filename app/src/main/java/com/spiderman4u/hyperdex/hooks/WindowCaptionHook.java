@@ -56,12 +56,14 @@ public class WindowCaptionHook {
         final String appName;
         final Object dotInstance;
         volatile float scale;
+        volatile int lastKnownWidth;
 
-        TaskData(int taskId, String appName, Object dotInstance, float scale) {
+        TaskData(int taskId, String appName, Object dotInstance, float scale, int lastKnownWidth) {
             this.taskId = taskId;
             this.appName = appName;
             this.dotInstance = dotInstance;
             this.scale = scale;
+            this.lastKnownWidth = lastKnownWidth;
         }
     }
 
@@ -70,6 +72,44 @@ public class WindowCaptionHook {
     private static final Map<Object, TaskData> sDotToTaskDataMap = new WeakHashMap<>();
     private static final Map<Object, Object> sTouchListenerToDotMap = new WeakHashMap<>();
     private static volatile Object sLastActiveDotObj = null;
+
+    private static float[] calculateVisibleBounds(View view, Object dotObj, int barLength, Context context) {
+        TaskData data = (view != null) ? sTaskDataMap.get(view) : null;
+        if (dotObj == null && data != null) {
+            dotObj = data.dotInstance;
+        }
+        if (dotObj == null) {
+            dotObj = sLastActiveDotObj;
+        }
+
+        Rect taskBounds = getTaskBounds(dotObj);
+        int winWidth = (taskBounds != null && taskBounds.width() > 0) ? taskBounds.width() : 0;
+        if (winWidth <= 0 && data != null && data.lastKnownWidth > 0) {
+            winWidth = data.lastKnownWidth;
+        }
+
+        float scale = getWindowScale(view, dotObj);
+        float visibleWidth;
+        if (winWidth > 0 && winWidth < barLength) {
+            visibleWidth = (float) winWidth;
+        } else if (scale > 0.1f && scale < 0.99f) {
+            visibleWidth = barLength * scale;
+        } else {
+            visibleWidth = barLength * 0.6525f;
+        }
+
+        if (visibleWidth > barLength) {
+            visibleWidth = barLength;
+        }
+
+        if (data != null && (int) visibleWidth > 0) {
+            data.lastKnownWidth = (int) visibleWidth;
+        }
+
+        float visibleLeft = (barLength - visibleWidth) / 2f;
+        float visibleRight = visibleLeft + visibleWidth;
+        return new float[]{visibleLeft, visibleRight};
+    }
 
     private static float getWindowScale(View view, Object dotObj) {
         if (dotObj != null) {
@@ -251,7 +291,7 @@ public class WindowCaptionHook {
         } catch (Throwable ignored) {}
         if (scale <= 0.1f || scale > 1.0f) scale = 1.0f;
 
-        TaskData taskData = new TaskData(taskId, appName, dotObj, scale);
+        TaskData taskData = new TaskData(taskId, appName, dotObj, scale, 0);
         sDotToTaskDataMap.put(dotObj, taskData);
 
         // Associate host with dot controller
@@ -467,11 +507,9 @@ public class WindowCaptionHook {
 
                     TaskData data = sTaskDataMap.get(view);
                     Object dotObj = (data != null) ? data.dotInstance : sLastActiveDotObj;
-                    float scale = getWindowScale(view, dotObj);
-
-                    float visibleWidth = barLength * scale;
-                    float visibleLeft = (barLength - visibleWidth) / 2f;
-                    float visibleRight = visibleLeft + visibleWidth;
+                    float[] bounds = calculateVisibleBounds(view, dotObj, barLength, context);
+                    float visibleLeft = bounds[0];
+                    float visibleRight = bounds[1];
 
                     canvas.save();
                     if (isRotated) {
@@ -588,10 +626,9 @@ public class WindowCaptionHook {
                     int taskId = (data != null) ? data.taskId : -1;
                     Object dotObj = (data != null) ? data.dotInstance : sLastActiveDotObj;
 
-                    float scale = getWindowScale(view, dotObj);
-                    float visibleWidth = barLength * scale;
-                    float visibleLeft = (barLength - visibleWidth) / 2f;
-                    float visibleRight = visibleLeft + visibleWidth;
+                    float[] bounds = calculateVisibleBounds(view, dotObj, barLength, context);
+                    float visibleLeft = bounds[0];
+                    float visibleRight = bounds[1];
 
                     float minBtnX = visibleRight - dp(context, 120);
                     if (touchPosAlongBar >= minBtnX && touchPosAlongBar <= visibleRight && touchPosAcrossBar >= 0 && touchPosAcrossBar <= barThickness) {
@@ -661,10 +698,9 @@ public class WindowCaptionHook {
                     Object dotObj = sTouchListenerToDotMap.get(param.thisObject);
                     if (dotObj == null) dotObj = sLastActiveDotObj;
 
-                    float scale = getWindowScale(view, dotObj);
-                    float visibleWidth = barLength * scale;
-                    float visibleLeft = (barLength - visibleWidth) / 2f;
-                    float visibleRight = visibleLeft + visibleWidth;
+                    float[] bounds = calculateVisibleBounds(view, dotObj, barLength, context);
+                    float visibleLeft = bounds[0];
+                    float visibleRight = bounds[1];
 
                     // If touching the right-side button cluster [-] [□] [X]
                     float minBtnX = visibleRight - dp(context, 120);
@@ -690,7 +726,39 @@ public class WindowCaptionHook {
         }
     }
 
+    private static final Map<Integer, Rect> sSavedWindowBounds = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static Rect getDisplayBounds(Context context) {
+        if (context != null) {
+            try {
+                WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+                if (wm != null) {
+                    android.view.WindowMetrics metrics = wm.getMaximumWindowMetrics();
+                    if (metrics != null && metrics.getBounds() != null) {
+                        return new Rect(metrics.getBounds());
+                    }
+                }
+            } catch (Throwable ignored) {}
+            try {
+                android.util.DisplayMetrics dm = context.getResources().getDisplayMetrics();
+                return new Rect(0, 0, dm.widthPixels, dm.heightPixels);
+            } catch (Throwable ignored) {}
+        }
+        return new Rect(0, 0, 2560, 1600);
+    }
+
     public static void performClose(Context context, int taskId, Object dotInstance) {
+        if (dotInstance != null) {
+            try {
+                Object clickListener = XposedHelpers.getObjectField(dotInstance, "mOnMiuiCaptionClickListener");
+                Object controller = XposedHelpers.getObjectField(dotInstance, "mMiuiDecorationController");
+                if (clickListener != null) {
+                    XposedHelpers.callMethod(clickListener, "handleCloseClicked", controller);
+                    return;
+                }
+            } catch (Throwable ignored) {}
+        }
+
         try {
             if (taskId > 0) {
                 Class<?> atmCls = Class.forName("android.app.ActivityTaskManager");
@@ -751,45 +819,48 @@ public class WindowCaptionHook {
     }
 
     public static void performMaximize(Context context, int taskId, Object dotInstance) {
-        if (dotInstance != null) {
-            try {
-                Object taskInfo = XposedHelpers.getObjectField(dotInstance, "mRunningTaskInfo");
-                Object taskOrg = XposedHelpers.getObjectField(dotInstance, "mTaskOrganizer");
-                if (taskInfo != null && taskOrg != null) {
-                    Object token = XposedHelpers.getObjectField(taskInfo, "token");
-                    Class<?> wctCls = Class.forName("android.window.WindowContainerTransaction");
-                    Object wct = wctCls.newInstance();
-                    int currentMode = 5;
-                    try {
-                        currentMode = XposedHelpers.getIntField(dotInstance, "mWindowingMode");
-                    } catch (Throwable ignored) {}
-                    int targetMode = (currentMode == 1) ? 5 : 1;
-                    XposedHelpers.callMethod(wct, "setWindowingMode", token, targetMode);
-                    XposedHelpers.callMethod(taskOrg, "applyTransaction", wct);
-                    return;
-                }
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + "performMaximize via WCT failed: " + t);
-            }
-        }
-
+        if (dotInstance == null) return;
         try {
-            if (taskId > 0) {
-                Class<?> atmCls = Class.forName("android.app.ActivityTaskManager");
-                Method getService = atmCls.getMethod("getService");
-                Object atm = getService.invoke(null);
-                try {
-                    Method setWindowingMode = atm.getClass().getMethod("setTaskWindowingMode", int.class, int.class, boolean.class);
-                    setWindowingMode.invoke(atm, taskId, 1, true);
-                    return;
-                } catch (Throwable t1) {
-                    Method setWindowingMode = atm.getClass().getMethod("setTaskWindowingMode", int.class, int.class);
-                    setWindowingMode.invoke(atm, taskId, 1);
-                    return;
+            Object taskInfo = XposedHelpers.getObjectField(dotInstance, "mRunningTaskInfo");
+            Object taskOrg = XposedHelpers.getObjectField(dotInstance, "mTaskOrganizer");
+            if (taskInfo == null || taskOrg == null) return;
+
+            Object token = XposedHelpers.getObjectField(taskInfo, "token");
+            Class<?> wctCls = Class.forName("android.window.WindowContainerTransaction");
+            Object wct = wctCls.newInstance();
+
+            Rect currentBounds = getTaskBounds(dotInstance);
+            Rect displayBounds = getDisplayBounds(context);
+            int barHeight = dp(context, ConfigManager.getTaskbarHeight(context));
+            Rect desktopMaxBounds = new Rect(0, 0, displayBounds.width(), displayBounds.height() - barHeight);
+
+            boolean isAlreadyMaximized = (currentBounds != null &&
+                    Math.abs(currentBounds.width() - desktopMaxBounds.width()) <= dp(context, 20) &&
+                    Math.abs(currentBounds.height() - desktopMaxBounds.height()) <= dp(context, 40));
+
+            if (isAlreadyMaximized) {
+                // Restore to saved bounds
+                Rect restoreBounds = (taskId > 0) ? sSavedWindowBounds.get(taskId) : null;
+                if (restoreBounds == null) {
+                    int w = (int) (displayBounds.width() * 0.7f);
+                    int h = (int) (displayBounds.height() * 0.7f);
+                    int x = (displayBounds.width() - w) / 2;
+                    int y = (displayBounds.height() - barHeight - h) / 2;
+                    restoreBounds = new Rect(x, y, x + w, y + h);
                 }
+                XposedHelpers.callMethod(wct, "setBounds", token, restoreBounds);
+            } else {
+                // Save current bounds for restore
+                if (currentBounds != null && currentBounds.width() > 0 && taskId > 0) {
+                    sSavedWindowBounds.put(taskId, new Rect(currentBounds));
+                }
+                // Maximize to full desktop work area (above taskbar)
+                XposedHelpers.callMethod(wct, "setBounds", token, desktopMaxBounds);
             }
+
+            XposedHelpers.callMethod(taskOrg, "applyTransaction", wct);
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "setTaskWindowingMode failed: " + t);
+            XposedBridge.log(TAG + "performMaximize failed: " + t);
         }
     }
 

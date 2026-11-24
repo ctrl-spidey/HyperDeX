@@ -38,7 +38,7 @@ public class ConfigManager {
     }
 
     public static boolean isClassicWindowControlsEnabled(Context context) {
-        return isDeXButtonsEnabled(context);
+        return isDeXButtonsEnabled(context) && shouldApplyDeXTaskbar(context);
     }
 
     public static boolean isApplyInNormalModeEnabled(Context context) {

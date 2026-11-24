@@ -74,7 +74,7 @@ public class DeXNavButtonsView extends LinearLayout {
         btnSearch = createIconButton(context, btnSize, iconPadding);
         btnSearch.setId(R.id.dex_btn_search);
         btnSearch.setImageDrawable(DeXVectorDrawables.createSearchDrawable(iconColor));
-        btnSearch.setOnClickListener(v -> sendNavAction(context, "search"));
+        btnSearch.setOnClickListener(v -> triggerSearch(context));
         addView(btnSearch);
 
         // 5. Apps Drawer Button [ ::: ]
@@ -131,38 +131,74 @@ public class DeXNavButtonsView extends LinearLayout {
         } catch (Throwable ignored) {}
     }
 
-    private void toggleAppDrawer(Context context) {
+    private Object getLauncher(Context context) {
+        Context ctx = context;
+        while (ctx instanceof android.content.ContextWrapper) {
+            if (ctx.getClass().getName().contains("Launcher")) {
+                return ctx;
+            }
+            ctx = ((android.content.ContextWrapper) ctx).getBaseContext();
+        }
         try {
             Class<?> appClass = Class.forName("com.miui.home.launcher.Application");
             Method getLauncherMethod = appClass.getMethod("getLauncher");
             Object launcher = getLauncherMethod.invoke(null);
-            if (launcher != null) {
-                try {
-                    Method showMethod = launcher.getClass().getMethod("showAllApps", boolean.class);
-                    showMethod.invoke(launcher, true);
-                    return;
-                } catch (Throwable t1) {
-                    Method showMethod = launcher.getClass().getMethod("showAllApps");
-                    showMethod.invoke(launcher);
-                    return;
-                }
+            if (launcher != null) return launcher;
+        } catch (Throwable ignored) {}
+        try {
+            Class<?> lasCls = Class.forName("com.miui.home.launcher.LauncherAppState");
+            Object appState = lasCls.getMethod("getInstance").invoke(null);
+            if (appState != null) {
+                return appState.getClass().getMethod("getLauncher").invoke(appState);
             }
         } catch (Throwable ignored) {}
+        return null;
+    }
 
-        try {
-            Method showMethod = context.getClass().getMethod("showAllApps", boolean.class);
-            showMethod.invoke(context, true);
-            return;
-        } catch (Throwable ignored) {}
+    private void toggleAppDrawer(Context context) {
+        Object launcher = getLauncher(context);
+        if (launcher != null) {
+            try {
+                Method showMethod = launcher.getClass().getMethod("showOrHideAllAppsWindow");
+                showMethod.invoke(launcher);
+                return;
+            } catch (Throwable ignored) {}
+            try {
+                Method showMethod = launcher.getClass().getMethod("setAllAppsSheetShowOrHide");
+                showMethod.invoke(launcher);
+                return;
+            } catch (Throwable ignored) {}
+            try {
+                Method showMethod = launcher.getClass().getMethod("showAllApps", boolean.class);
+                showMethod.invoke(launcher, true);
+                return;
+            } catch (Throwable ignored) {}
+            try {
+                Method showMethod = launcher.getClass().getMethod("showAllApps");
+                showMethod.invoke(launcher);
+                return;
+            } catch (Throwable ignored) {}
+        }
+    }
 
-        try {
-            Method showMethod = context.getClass().getMethod("showAllApps");
-            showMethod.invoke(context);
-            return;
-        } catch (Throwable ignored) {}
-
-        // Fallback: send menu / search key via SystemUI
-        sendNavAction(context, "search");
+    private void triggerSearch(Context context) {
+        Object launcher = getLauncher(context);
+        if (launcher != null) {
+            try {
+                Method getLaptopCtrl = launcher.getClass().getMethod("getLaptopAllAppsController");
+                Object laptopCtrl = getLaptopCtrl.invoke(launcher);
+                if (laptopCtrl != null) {
+                    Method showSearch = laptopCtrl.getClass().getMethod("showSearchApps");
+                    showSearch.invoke(laptopCtrl);
+                    return;
+                }
+            } catch (Throwable ignored) {}
+            try {
+                Method showMethod = launcher.getClass().getMethod("showOrHideAllAppsWindow");
+                showMethod.invoke(launcher);
+                return;
+            } catch (Throwable ignored) {}
+        }
     }
 
     public static void sendNavAction(Context context, String action) {

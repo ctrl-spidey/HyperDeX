@@ -176,7 +176,27 @@ public class DeXSystemTrayView extends LinearLayout {
         lpStrip.setMarginEnd(dp(2));
         addView(vDesktopStrip, lpStrip);
 
+        updateResponsiveLayout();
         updateClock();
+    }
+
+    public void updateResponsiveLayout() {
+        boolean isPortrait = getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT;
+        if (ivScreenshot != null) {
+            ivScreenshot.setVisibility(isPortrait ? View.GONE : View.VISIBLE);
+        }
+        if (ivVolume != null) {
+            ivVolume.setVisibility(isPortrait ? View.GONE : View.VISIBLE);
+        }
+        if (tvDate != null) {
+            tvDate.setVisibility(isPortrait ? View.GONE : View.VISIBLE);
+        }
+    }
+
+    @Override
+    protected void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        updateResponsiveLayout();
     }
 
     private void updateClock() {

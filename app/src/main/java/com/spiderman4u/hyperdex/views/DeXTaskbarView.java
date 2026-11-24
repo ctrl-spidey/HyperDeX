@@ -74,7 +74,6 @@ public class DeXTaskbarView extends FrameLayout {
         );
         lpApps.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
         lpApps.leftMargin = navWidth + dp(context, 8);
-        lpApps.rightMargin = dp(context, 260);
         addView(dockAppsView, lpApps);
 
         // 3. Far-Right Unified System Tray
@@ -123,7 +122,6 @@ public class DeXTaskbarView extends FrameLayout {
                 LayoutParams flp = (LayoutParams) lp;
                 flp.height = barHeightPx;
                 flp.leftMargin = navWidth + dp(context, 8);
-                flp.rightMargin = dp(context, 260);
                 dockAppsView.setLayoutParams(flp);
             }
             dockAppsView.reloadApps(context);
@@ -136,6 +134,79 @@ public class DeXTaskbarView extends FrameLayout {
                 systemTrayView.setLayoutParams(lp);
             }
         }
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        int width = MeasureSpec.getSize(widthMeasureSpec);
+        int barHeightDp = ConfigManager.getTaskbarHeight(getContext());
+        int height = dp(getContext(), barHeightDp);
+        int heightSpec = MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY);
+
+        // 1. Measure Nav Buttons
+        if (navButtonsView != null && navButtonsView.getVisibility() != GONE) {
+            navButtonsView.measure(
+                    MeasureSpec.makeMeasureSpec(width, MeasureSpec.AT_MOST),
+                    heightSpec
+            );
+        }
+        int navW = (navButtonsView != null && navButtonsView.getVisibility() != GONE) ? navButtonsView.getMeasuredWidth() : 0;
+
+        // 2. Measure System Tray
+        if (systemTrayView != null && systemTrayView.getVisibility() != GONE) {
+            systemTrayView.measure(
+                    MeasureSpec.makeMeasureSpec(width, MeasureSpec.AT_MOST),
+                    heightSpec
+            );
+        }
+        int trayW = (systemTrayView != null && systemTrayView.getVisibility() != GONE) ? systemTrayView.getMeasuredWidth() : 0;
+
+        // 3. Constrain Dock Apps strictly to remaining space between Nav and Tray
+        int spacing = dp(getContext(), 16);
+        int maxDockW = Math.max(0, width - navW - trayW - spacing);
+        if (dockAppsView != null && dockAppsView.getVisibility() != GONE) {
+            dockAppsView.measure(
+                    MeasureSpec.makeMeasureSpec(maxDockW, MeasureSpec.EXACTLY),
+                    heightSpec
+            );
+        }
+
+        setMeasuredDimension(width, height);
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        int width = right - left;
+        int height = bottom - top;
+
+        int navW = (navButtonsView != null && navButtonsView.getVisibility() != GONE) ? navButtonsView.getMeasuredWidth() : 0;
+        int trayW = (systemTrayView != null && systemTrayView.getVisibility() != GONE) ? systemTrayView.getMeasuredWidth() : 0;
+
+        if (navButtonsView != null && navButtonsView.getVisibility() != GONE) {
+            int navLeft = dp(getContext(), 4);
+            navButtonsView.layout(navLeft, 0, navLeft + navW, height);
+        }
+
+        if (systemTrayView != null && systemTrayView.getVisibility() != GONE) {
+            int trayRight = width - dp(getContext(), 4);
+            systemTrayView.layout(trayRight - trayW, 0, trayRight, height);
+        }
+
+        if (dockAppsView != null && dockAppsView.getVisibility() != GONE) {
+            int dockLeft = navW + dp(getContext(), 8);
+            int dockRight = width - trayW - dp(getContext(), 8);
+            if (dockRight < dockLeft) dockRight = dockLeft;
+            dockAppsView.layout(dockLeft, 0, dockRight, height);
+        }
+    }
+
+    @Override
+    protected void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (systemTrayView != null) {
+            systemTrayView.updateResponsiveLayout();
+        }
+        requestLayout();
     }
 
     public DeXDockAppsView getDockAppsView() {
