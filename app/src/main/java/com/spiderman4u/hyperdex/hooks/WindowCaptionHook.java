@@ -297,7 +297,7 @@ public class WindowCaptionHook {
     private static void hookMiuiDecorationRootViewHost(XC_LoadPackage.LoadPackageParam lpparam) {
         String[] hostClasses = new String[] {
                 "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationDotViewHost",
-                "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationRootViewHost"
+                // abstract
         };
 
         for (String className : hostClasses) {
@@ -423,6 +423,7 @@ public class WindowCaptionHook {
                     Canvas canvas = (Canvas) param.args[0];
                     int rawW = view.getWidth();
                     int rawH = view.getHeight();
+                    XposedBridge.log(TAG + "onDraw on " + view.getClass().getSimpleName() + " rawW=" + rawW + " rawH=" + rawH + " cW=" + canvas.getWidth() + " cH=" + canvas.getHeight() + " clip=" + canvas.getClipBounds());
                     if (rawW <= 0 || rawH <= 0) return;
 
                     boolean isRotated = rawW < rawH;
