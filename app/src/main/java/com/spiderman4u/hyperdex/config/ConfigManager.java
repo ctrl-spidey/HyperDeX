@@ -37,6 +37,10 @@ public class ConfigManager {
         return getGlobalBoolean(context, SETTING_DEX_BUTTONS, true);
     }
 
+    public static boolean isClassicWindowControlsEnabled(Context context) {
+        return isDeXButtonsEnabled(context);
+    }
+
     public static boolean isApplyInNormalModeEnabled(Context context) {
         return getGlobalBoolean(context, SETTING_APPLY_NORMAL, false);
     }
