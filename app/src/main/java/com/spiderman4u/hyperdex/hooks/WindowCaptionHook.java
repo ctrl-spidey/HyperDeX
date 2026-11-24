@@ -23,6 +23,7 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -88,7 +89,15 @@ public class WindowCaptionHook {
                     lpparam.classLoader
             );
             if (dotCls != null) {
-                // 1. relayout: link TaskInfo and ViewHost BEFORE and AFTER
+                // 1. Constructors: link dot and host immediately
+                XposedBridge.hookAllConstructors(dotCls, new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        linkDotAndHost(param.thisObject, param.args);
+                    }
+                });
+
+                // 2. relayout: link TaskInfo and ViewHost BEFORE and AFTER
                 XposedBridge.hookAllMethods(dotCls, "relayout", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -101,15 +110,21 @@ public class WindowCaptionHook {
                     }
                 });
 
-                // 2. updateViews: ensure host mapping is established right before surface dimensions are read
+                // 3. updateViews: ensure host mapping and layout params
                 XposedBridge.hookAllMethods(dotCls, "updateViews", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         linkDotAndHost(param.thisObject, null);
                     }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        linkDotAndHost(param.thisObject, null);
+                        applySurfacePositionAndCrop(param.thisObject, null);
+                    }
                 });
 
-                // 3. updateTopCaptionSurface: position at (0, 0) and crop to task bounds width
+                // 4. updateTopCaptionSurface: position at (0, 0) and crop to full task bounds width
                 XposedBridge.hookAllMethods(dotCls, "updateTopCaptionSurface", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -127,6 +142,40 @@ public class WindowCaptionHook {
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Failed hooking MiuiDecorationDot: " + t);
         }
+    }
+
+    private static Rect getTaskBounds(Object dotObj) {
+        if (dotObj == null) return null;
+        Rect bounds = null;
+        try {
+            bounds = (Rect) XposedHelpers.getObjectField(dotObj, "mTaskBounds");
+        } catch (Throwable ignored) {}
+        if (bounds == null || bounds.width() <= 0) {
+            try {
+                Object taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
+                if (taskInfo != null) {
+                    Object cfg = XposedHelpers.getObjectField(taskInfo, "configuration");
+                    if (cfg != null) {
+                        Object winCfg = XposedHelpers.getObjectField(cfg, "windowConfiguration");
+                        if (winCfg != null) {
+                            bounds = (Rect) XposedHelpers.callMethod(winCfg, "getBounds");
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+        return bounds;
+    }
+
+    private static int getWindowWidth(Object dotObj, Context context) {
+        Rect bounds = getTaskBounds(dotObj);
+        int winWidth = (bounds != null) ? Math.max(bounds.width(), bounds.height()) : 0;
+        if (winWidth <= 0 && context != null) {
+            try {
+                winWidth = context.getResources().getDisplayMetrics().widthPixels;
+            } catch (Throwable ignored) {}
+        }
+        return winWidth;
     }
 
     private static void linkDotAndHost(Object dotObj, Object[] args) {
@@ -178,7 +227,7 @@ public class WindowCaptionHook {
                     View dotView = (View) XposedHelpers.callMethod(host, "getRootView");
                     if (dotView != null) {
                         sTaskDataMap.put(dotView, taskData);
-                        dotView.invalidate();
+                        dotView.postInvalidate();
                     }
                 } catch (Throwable ignored) {}
             }
@@ -199,7 +248,7 @@ public class WindowCaptionHook {
                 Object v = f.get(dotObj);
                 if (v instanceof View && v.getClass().getName().contains("MiuiDecorationDotView")) {
                     sTaskDataMap.put((View) v, taskData);
-                    ((View) v).invalidate();
+                    ((View) v).postInvalidate();
                     break;
                 }
             } catch (Throwable ignored) {}
@@ -207,7 +256,7 @@ public class WindowCaptionHook {
     }
 
     private static void applySurfacePositionAndCrop(Object dotObj, Object[] args) {
-        if (dotObj == null || args == null || args.length < 2) return;
+        if (dotObj == null) return;
         Context context = null;
         try {
             context = (Context) XposedHelpers.getObjectField(dotObj, "mContext");
@@ -217,19 +266,28 @@ public class WindowCaptionHook {
             return;
         }
 
-        if (args[1] instanceof Rect) {
-            Object t = args[0]; // SurfaceControl.Transaction
-            Rect taskBounds = (Rect) args[1];
-            Object surface = null;
-            try {
-                surface = XposedHelpers.getObjectField(dotObj, "mCaptionContainerSurface");
-            } catch (Throwable ignored) {}
+        Object surface = null;
+        try {
+            surface = XposedHelpers.getObjectField(dotObj, "mCaptionContainerSurface");
+        } catch (Throwable ignored) {}
 
-            if (t != null && surface != null && taskBounds != null && taskBounds.width() > 0) {
-                int h = dp(context, 32);
-                XposedHelpers.callMethod(t, "setPosition", surface, 0f, 0f);
-                XposedHelpers.callMethod(t, "setWindowCrop", surface, taskBounds.width(), h);
+        int winWidth = getWindowWidth(dotObj, context);
+        int barHeight = dp(context, 32);
+
+        Object t = null;
+        if (args != null && args.length > 0 && args[0] != null) {
+            String name = args[0].getClass().getName();
+            if (name.contains("Transaction")) {
+                t = args[0];
             }
+        }
+
+        if (t != null && surface != null && winWidth > 0) {
+            try {
+                XposedHelpers.callMethod(t, "setPosition", surface, 0f, 0f);
+                XposedHelpers.callMethod(t, "setWindowCrop", surface, winWidth, barHeight);
+                XposedHelpers.callMethod(t, "show", surface);
+            } catch (Throwable ignored) {}
         }
     }
 
@@ -238,7 +296,8 @@ public class WindowCaptionHook {
      */
     private static void hookMiuiDecorationRootViewHost(XC_LoadPackage.LoadPackageParam lpparam) {
         String[] hostClasses = new String[] {
-                "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationDotViewHost"
+                "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationDotViewHost",
+                "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationRootViewHost"
         };
 
         for (String className : hostClasses) {
@@ -246,7 +305,7 @@ public class WindowCaptionHook {
                 Class<?> cls = XposedHelpers.findClassIfExists(className, lpparam.classLoader);
                 if (cls == null) continue;
 
-                // getSurfaceWidth: return taskBounds.width() instead of narrow pill width
+                // getSurfaceWidth: return full window width instead of narrow pill width
                 XposedBridge.hookAllMethods(cls, "getSurfaceWidth", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -258,23 +317,9 @@ public class WindowCaptionHook {
                             try {
                                 Context context = (Context) XposedHelpers.getObjectField(dotObj, "mContext");
                                 if (ConfigManager.isClassicWindowControlsEnabled(context)) {
-                                    Rect bounds = (Rect) XposedHelpers.getObjectField(dotObj, "mTaskBounds");
-                                    if (bounds == null || bounds.width() <= 0) {
-                                        Object taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
-                                        if (taskInfo != null) {
-                                            try {
-                                                Object cfg = XposedHelpers.getObjectField(taskInfo, "configuration");
-                                                if (cfg != null) {
-                                                    Object winCfg = XposedHelpers.getObjectField(cfg, "windowConfiguration");
-                                                    if (winCfg != null) {
-                                                        bounds = (Rect) XposedHelpers.callMethod(winCfg, "getBounds");
-                                                    }
-                                                }
-                                            } catch (Throwable ignored) {}
-                                        }
-                                    }
-                                    if (bounds != null && bounds.width() > 0) {
-                                        param.setResult((float) bounds.width());
+                                    int winWidth = getWindowWidth(dotObj, context);
+                                    if (winWidth > 0) {
+                                        param.setResult((float) winWidth);
                                     }
                                 }
                             } catch (Throwable ignored) {}
@@ -301,9 +346,49 @@ public class WindowCaptionHook {
                     }
                 });
 
+                // Enforce LayoutParams in createOrRelayoutView and relayoutView
+                XposedBridge.hookAllMethods(cls, "createOrRelayoutView", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        enforceFullCaptionParams(param.thisObject, param.args);
+                    }
+                });
+
+                XposedBridge.hookAllMethods(cls, "relayoutView", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        enforceFullCaptionParams(param.thisObject, param.args);
+                    }
+                });
+
                 XposedBridge.log(TAG + "Host class hooked: " + className);
             } catch (Throwable t) {
                 XposedBridge.log(TAG + "Failed hooking host class " + className + ": " + t);
+            }
+        }
+    }
+
+    private static void enforceFullCaptionParams(Object host, Object[] args) {
+        if (args == null || args.length == 0) return;
+        for (Object arg : args) {
+            if (arg instanceof WindowManager.LayoutParams) {
+                WindowManager.LayoutParams lp = (WindowManager.LayoutParams) arg;
+                Object dotObj = sHostToDotMap.get(host);
+                if (dotObj == null) dotObj = sLastActiveDotObj;
+                if (dotObj != null) {
+                    try {
+                        Context context = (Context) XposedHelpers.getObjectField(dotObj, "mContext");
+                        if (ConfigManager.isClassicWindowControlsEnabled(context)) {
+                            int winWidth = getWindowWidth(dotObj, context);
+                            if (winWidth > 0) {
+                                lp.width = winWidth;
+                                lp.height = dp(context, 32);
+                                lp.gravity = Gravity.TOP | Gravity.START;
+                            }
+                        }
+                    } catch (Throwable ignored) {}
+                }
+                break;
             }
         }
     }
@@ -336,24 +421,34 @@ public class WindowCaptionHook {
                     }
 
                     Canvas canvas = (Canvas) param.args[0];
-                    int w = view.getWidth();
-                    int h = view.getHeight();
-                    if (w <= 0 || h <= 0) return;
+                    int rawW = view.getWidth();
+                    int rawH = view.getHeight();
+                    if (rawW <= 0 || rawH <= 0) return;
 
-                    float cy = h / 2f;
+                    boolean isRotated = rawW < rawH;
+                    int barLength = isRotated ? rawH : rawW;
+                    int barThickness = isRotated ? rawW : rawH;
+
+                    canvas.save();
+                    if (isRotated) {
+                        canvas.translate(0f, (float) rawH);
+                        canvas.rotate(-90f);
+                    }
+
+                    float cy = barThickness / 2f;
 
                     // A. Dark sleek acrylic background header
                     Paint bgPaint = new Paint();
                     bgPaint.setColor(Color.parseColor("#DE141518"));
                     bgPaint.setStyle(Paint.Style.FILL);
                     bgPaint.setAntiAlias(true);
-                    canvas.drawRect(0, 0, w, h, bgPaint);
+                    canvas.drawRect(0, 0, barLength, barThickness, bgPaint);
 
                     // B. Crisp 1px bottom accent border
                     Paint strokePaint = new Paint();
                     strokePaint.setColor(Color.parseColor("#33FFFFFF"));
                     strokePaint.setStrokeWidth(1f);
-                    canvas.drawLine(0, h - 1, w, h - 1, strokePaint);
+                    canvas.drawLine(0, barThickness - 1, barLength, barThickness - 1, strokePaint);
 
                     // C. App Icon & Title on left
                     TaskData data = sTaskDataMap.get(view);
@@ -387,7 +482,7 @@ public class WindowCaptionHook {
                     pillPaint.setColor(Color.parseColor("#55FFFFFF"));
                     pillPaint.setStyle(Paint.Style.FILL);
                     pillPaint.setAntiAlias(true);
-                    canvas.drawRoundRect(w / 2f - dp(context, 18), cy - dp(context, 2), w / 2f + dp(context, 18), cy + dp(context, 2), dp(context, 2), dp(context, 2), pillPaint);
+                    canvas.drawRoundRect(barLength / 2f - dp(context, 18), cy - dp(context, 2), barLength / 2f + dp(context, 18), cy + dp(context, 2), dp(context, 2), dp(context, 2), pillPaint);
 
                     // E. Classic Samsung DeX Titlebar Buttons [-] [□] [X]
                     Paint btnPaint = new Paint();
@@ -398,21 +493,23 @@ public class WindowCaptionHook {
                     btnPaint.setStrokeCap(Paint.Cap.ROUND);
                     btnPaint.setStrokeJoin(Paint.Join.ROUND);
 
-                    // 1. [-] Minimize button: center at w - 100dp
-                    float minCx = w - dp(context, 100);
+                    // 1. [-] Minimize button: center at barLength - 100dp
+                    float minCx = barLength - dp(context, 100);
                     float minHalfW = dp(context, 5.5f);
                     canvas.drawLine(minCx - minHalfW, cy, minCx + minHalfW, cy, btnPaint);
 
-                    // 2. [□] Maximize button: center at w - 65dp
-                    float maxCx = w - dp(context, 65);
+                    // 2. [□] Maximize button: center at barLength - 65dp
+                    float maxCx = barLength - dp(context, 65);
                     float maxHalfSize = dp(context, 5f);
                     canvas.drawRect(maxCx - maxHalfSize, cy - maxHalfSize, maxCx + maxHalfSize, cy + maxHalfSize, btnPaint);
 
-                    // 3. [X] Close button: center at w - 28dp
-                    float closeCx = w - dp(context, 28);
+                    // 3. [X] Close button: center at barLength - 28dp
+                    float closeCx = barLength - dp(context, 28);
                     float closeHalfSize = dp(context, 4.5f);
                     canvas.drawLine(closeCx - closeHalfSize, cy - closeHalfSize, closeCx + closeHalfSize, cy + closeHalfSize, btnPaint);
                     canvas.drawLine(closeCx + closeHalfSize, cy - closeHalfSize, closeCx - closeHalfSize, cy + closeHalfSize, btnPaint);
+
+                    canvas.restore();
                 }
             });
 
@@ -430,21 +527,25 @@ public class WindowCaptionHook {
                     }
 
                     MotionEvent event = (MotionEvent) param.args[0];
-                    float x = event.getX();
-                    float y = event.getY();
-                    int w = view.getWidth();
-                    int h = view.getHeight();
+                    int rawW = view.getWidth();
+                    int rawH = view.getHeight();
+                    boolean isRotated = rawW < rawH;
+                    int barLength = isRotated ? rawH : rawW;
+                    int barThickness = isRotated ? rawW : rawH;
 
-                    float minBtnX = w - dp(context, 120);
-                    if (x >= minBtnX && y >= 0 && y <= h) {
+                    float touchPosAlongBar = isRotated ? (rawH - event.getY()) : event.getX();
+                    float touchPosAcrossBar = isRotated ? event.getX() : event.getY();
+
+                    float minBtnX = barLength - dp(context, 120);
+                    if (touchPosAlongBar >= minBtnX && touchPosAcrossBar >= 0 && touchPosAcrossBar <= barThickness) {
                         if (event.getAction() == MotionEvent.ACTION_UP) {
                             TaskData data = sTaskDataMap.get(view);
                             int taskId = (data != null) ? data.taskId : -1;
                             Object dotObj = (data != null) ? data.dotInstance : sLastActiveDotObj;
 
-                            if (x >= w - dp(context, 46)) {
+                            if (touchPosAlongBar >= barLength - dp(context, 46)) {
                                 performClose(context, taskId, dotObj);
-                            } else if (x >= w - dp(context, 82)) {
+                            } else if (touchPosAlongBar >= barLength - dp(context, 82)) {
                                 performMaximize(context, taskId, dotObj);
                             } else {
                                 performMinimize(context, taskId, dotObj);
@@ -486,13 +587,18 @@ public class WindowCaptionHook {
                     Context context = view.getContext();
                     if (!ConfigManager.isClassicWindowControlsEnabled(context)) return;
 
-                    int w = view.getWidth();
-                    int h = view.getHeight();
-                    float x = event.getX();
-                    float y = event.getY();
+                    int rawW = view.getWidth();
+                    int rawH = view.getHeight();
+                    boolean isRotated = rawW < rawH;
+                    int barLength = isRotated ? rawH : rawW;
+                    int barThickness = isRotated ? rawW : rawH;
+
+                    float touchPosAlongBar = isRotated ? (rawH - event.getY()) : event.getX();
+                    float touchPosAcrossBar = isRotated ? event.getX() : event.getY();
 
                     // If touching the right-side button cluster [-] [□] [X]
-                    if (x >= w - dp(context, 120) && y >= 0 && y <= h) {
+                    float minBtnX = barLength - dp(context, 120);
+                    if (touchPosAlongBar >= minBtnX && touchPosAcrossBar >= 0 && touchPosAcrossBar <= barThickness) {
                         if (event.getAction() == MotionEvent.ACTION_UP) {
                             int taskId = -1;
                             try {
@@ -506,9 +612,9 @@ public class WindowCaptionHook {
                             Object dotObj = sTouchListenerToDotMap.get(param.thisObject);
                             if (dotObj == null) dotObj = sLastActiveDotObj;
 
-                            if (x >= w - dp(context, 46)) {
+                            if (touchPosAlongBar >= barLength - dp(context, 46)) {
                                 performClose(context, taskId, dotObj);
-                            } else if (x >= w - dp(context, 82)) {
+                            } else if (touchPosAlongBar >= barLength - dp(context, 82)) {
                                 performMaximize(context, taskId, dotObj);
                             } else {
                                 performMinimize(context, taskId, dotObj);
