@@ -4,14 +4,26 @@
     <string name="app_subtitle">Samsung Classic DeX &amp; Dual Workstation Engine</string>
     
     <string name="title_active_mode">Operating Mode</string>
-    <string name="desc_mode_dex">Classic Samsung DeX style active (Edge-to-edge taskbar, 9-dot Start menu, PC window controls)</string>
+    <string name="desc_mode_dex">Classic Samsung DeX style active (Slim taskbar, 3-button nav, Quick popups, PC window controls)</string>
     <string name="desc_mode_workstation">Stock Xiaomi HyperOS Workstation Mode active (Floating dock, gesture navigation, standard pill)</string>
     
-    <string name="title_taskbar_opts">Taskbar &amp; Dock Customization</string>
+    <string name="title_taskbar_opts">Taskbar Customization &amp; Ergonomics</string>
     <string name="opt_edge_to_edge">Edge-to-Edge Taskbar</string>
-    <string name="opt_edge_to_edge_desc">Expand dock to 100% width and remove rounded pill margins</string>
+    <string name="opt_edge_to_edge_desc">Expand dock to 100% screen width and eliminate floating pills</string>
     <string name="opt_start_menu">Samsung 9-Dot Start Button</string>
     <string name="opt_start_menu_desc">Anchor app drawer button to bottom-left with DeX grid icon</string>
+    <string name="opt_nav_buttons">DeX Navigation Buttons</string>
+    <string name="opt_nav_buttons_desc">Display authentic Recents [ ||| ], Home [ ◯ ], and Back [ &lt; ] buttons on far-left</string>
+    <string name="opt_search_button">DeX Search Button</string>
+    <string name="opt_search_button_desc">Display dedicated Search [ Q ] button next to navigation controls</string>
+    <string name="opt_floating_popups">DeX Floating Popups</string>
+    <string name="opt_floating_popups_desc">Show compact Samsung DeX Quick Settings &amp; Notification popups above tray instead of full screen</string>
+
+    <string name="opt_taskbar_height">Taskbar Height</string>
+    <string name="opt_icon_size">Taskbar Icon Size</string>
+    <string name="opt_icon_spacing">Icon Spacing</string>
+    <string name="opt_taskbar_opacity">Taskbar Background Opacity</string>
+    <string name="btn_reset_defaults">Reset Taskbar to DeX Defaults</string>
     
     <string name="title_window_opts">Window Management</string>
     <string name="opt_dex_buttons">Classic Window Controls</string>
@@ -30,6 +42,7 @@
     <string name="btn_restart_launcher">Restart Launcher &amp; SystemUI</string>
     <string name="btn_restart_launcher_desc">Safely reloads Launcher and SystemUI to apply all hooks instantly</string>
     <string name="toast_restarted">Launcher &amp; SystemUI refreshed successfully!</string>
+    <string name="toast_reset_defaults">Taskbar settings reset to Samsung DeX defaults!</string>
     <string name="qs_tile_dex">DeX Mode</string>
     <string name="qs_tile_workstation">Workstation</string>
 </resources>

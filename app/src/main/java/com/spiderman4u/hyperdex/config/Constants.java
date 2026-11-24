@@ -14,6 +14,13 @@ public final class Constants {
     public static final String PREF_START_MENU = "pref_start_menu";
     public static final String PREF_DEX_BUTTONS = "pref_dex_buttons";
     public static final String PREF_APPLY_NORMAL = "pref_apply_normal";
+    public static final String PREF_SHOW_NAV_BUTTONS = "pref_show_nav_buttons";
+    public static final String PREF_SHOW_SEARCH_BUTTON = "pref_show_search_button";
+    public static final String PREF_FLOATING_POPUPS = "pref_floating_popups";
+    public static final String PREF_TASKBAR_HEIGHT = "pref_taskbar_height";
+    public static final String PREF_ICON_SIZE = "pref_icon_size";
+    public static final String PREF_ICON_SPACING = "pref_icon_spacing";
+    public static final String PREF_TASKBAR_OPACITY = "pref_taskbar_opacity";
 
     public static final String ACTION_MODE_CHANGED = "com.spiderman4u.hyperdex.ACTION_MODE_CHANGED";
     public static final String ACTION_TOGGLE_MODE = "com.spiderman4u.hyperdex.ACTION_TOGGLE_MODE";
@@ -23,4 +30,10 @@ public final class Constants {
     public static final String AUTHORITY = "com.spiderman4u.hyperdex.provider";
     public static final String METHOD_GET_PREFS = "get_prefs";
     public static final String METHOD_SET_PREF = "set_pref";
+
+    // Defaults matching Samsung DeX
+    public static final int DEFAULT_TASKBAR_HEIGHT = 44; // dp
+    public static final int DEFAULT_ICON_SIZE = 34;       // dp
+    public static final int DEFAULT_ICON_SPACING = 6;      // dp
+    public static final int DEFAULT_TASKBAR_OPACITY = 92;  // %
 }

@@ -11,4 +11,5 @@
 *.ap_
 *.aab
 release/
+dist_*/
 scratch/

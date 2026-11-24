@@ -5,4 +5,10 @@
     <item name="dex_btn_minimize" type="id" />
     <item name="dex_btn_maximize" type="id" />
     <item name="dex_btn_close" type="id" />
+    <item name="dex_nav_buttons" type="id" />
+    <item name="dex_btn_recents" type="id" />
+    <item name="dex_btn_home" type="id" />
+    <item name="dex_btn_back" type="id" />
+    <item name="dex_btn_search" type="id" />
+    <item name="dex_btn_apps" type="id" />
 </resources>

@@ -18,6 +18,8 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.spiderman4u.hyperdex.config.ConfigManager;
+
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -30,6 +32,8 @@ public class DeXSystemTrayView extends LinearLayout {
     private ImageView ivBattery;
     private ImageView ivWifi;
     private ImageView ivNotification;
+    private ImageView ivVolume;
+    private ImageView ivScreenshot;
     private View vDesktopStrip;
 
     private DeXVectorDrawables.BatteryDrawable batteryDrawable;
@@ -76,32 +80,51 @@ public class DeXSystemTrayView extends LinearLayout {
     private void init(Context context) {
         setOrientation(HORIZONTAL);
         setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
-        setPadding(dp(8), 0, dp(6), 0);
+        setPadding(dp(6), 0, dp(4), 0);
 
         int iconColor = Color.parseColor("#E1E2E8");
+        int btnSize = dp(28);
 
-        // 1. Notification Bell Button
+        // 1. Screenshot Quick Capture Icon [ • ]
+        ivScreenshot = new ImageView(context);
+        ivScreenshot.setPadding(dp(4), dp(4), dp(4), dp(4));
+        ivScreenshot.setImageDrawable(DeXVectorDrawables.createScreenshotDrawable(iconColor));
+        ivScreenshot.setOnClickListener(v -> triggerScreenshot(context));
+        addView(ivScreenshot, new LayoutParams(btnSize, btnSize));
+
+        // 2. Volume Speaker Icon
+        ivVolume = new ImageView(context);
+        ivVolume.setPadding(dp(4), dp(4), dp(4), dp(4));
+        ivVolume.setImageDrawable(DeXVectorDrawables.createVolumeDrawable(iconColor, false));
+        ivVolume.setOnClickListener(v -> onQuickSettingsClicked(context, v));
+        LayoutParams lpVol = new LayoutParams(btnSize, btnSize);
+        lpVol.setMarginStart(dp(2));
+        addView(ivVolume, lpVol);
+
+        // 3. Notification Bell Button
         ivNotification = new ImageView(context);
         ivNotification.setPadding(dp(4), dp(4), dp(4), dp(4));
-        ivNotification.setImageDrawable(new DeXVectorDrawables.BellDrawable(iconColor));
-        ivNotification.setOnClickListener(v -> expandNotifications(context));
-        addView(ivNotification, new LayoutParams(dp(28), dp(28)));
+        ivNotification.setImageDrawable(DeXVectorDrawables.createBellDrawable(iconColor));
+        ivNotification.setOnClickListener(v -> onNotificationClicked(context, v));
+        LayoutParams lpNotif = new LayoutParams(btnSize, btnSize);
+        lpNotif.setMarginStart(dp(2));
+        addView(ivNotification, lpNotif);
 
-        // 2. Wi-Fi Icon
+        // 4. Wi-Fi Icon
         ivWifi = new ImageView(context);
         ivWifi.setPadding(dp(4), dp(4), dp(4), dp(4));
-        ivWifi.setImageDrawable(new DeXVectorDrawables.WifiDrawable(iconColor));
-        ivWifi.setOnClickListener(v -> openWifiSettings(context));
-        LayoutParams lpWifi = new LayoutParams(dp(28), dp(28));
-        lpWifi.setMarginStart(dp(4));
+        ivWifi.setImageDrawable(DeXVectorDrawables.createWifiDrawable(iconColor));
+        ivWifi.setOnClickListener(v -> onQuickSettingsClicked(context, v));
+        LayoutParams lpWifi = new LayoutParams(btnSize, btnSize);
+        lpWifi.setMarginStart(dp(2));
         addView(ivWifi, lpWifi);
 
-        // 3. Battery Group (Battery Icon + Text)
+        // 5. Battery Group (Horizontal Pill + Percentage)
         LinearLayout batteryLayout = new LinearLayout(context);
         batteryLayout.setOrientation(HORIZONTAL);
         batteryLayout.setGravity(Gravity.CENTER_VERTICAL);
-        batteryLayout.setPadding(dp(6), 0, dp(4), 0);
-        batteryLayout.setOnClickListener(v -> openBatterySettings(context));
+        batteryLayout.setPadding(dp(4), 0, dp(2), 0);
+        batteryLayout.setOnClickListener(v -> onQuickSettingsClicked(context, v));
 
         ivBattery = new ImageView(context);
         batteryDrawable = new DeXVectorDrawables.BatteryDrawable(iconColor);
@@ -117,40 +140,40 @@ public class DeXSystemTrayView extends LinearLayout {
         batteryLayout.addView(tvBattery);
 
         LayoutParams lpBattery = new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT);
-        lpBattery.setMarginStart(dp(4));
+        lpBattery.setMarginStart(dp(2));
         addView(batteryLayout, lpBattery);
 
-        // 4. Clock and Date Group (2-line clean DeX typography)
+        // 6. Clock and Date Group (2-line clean DeX typography)
         LinearLayout clockLayout = new LinearLayout(context);
         clockLayout.setOrientation(VERTICAL);
         clockLayout.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
-        clockLayout.setPadding(dp(8), 0, dp(8), 0);
+        clockLayout.setPadding(dp(6), 0, dp(6), 0);
         clockLayout.setOnClickListener(v -> openClock(context));
 
         tvTime = new TextView(context);
         tvTime.setTextColor(Color.WHITE);
-        tvTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        tvTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         tvTime.setTypeface(null, Typeface.BOLD);
         clockLayout.addView(tvTime);
 
         tvDate = new TextView(context);
         tvDate.setTextColor(Color.parseColor("#A0A2AA"));
-        tvDate.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        tvDate.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9.5f);
         clockLayout.addView(tvDate);
 
         addView(clockLayout);
 
-        // 5. Far right "Show Desktop" vertical touch strip
+        // 7. Far right "Show Desktop" vertical touch strip
         vDesktopStrip = new View(context);
         GradientDrawable stripBg = new GradientDrawable();
-        stripBg.setColor(Color.parseColor("#4DFFFFFF")); // 30% translucent white
+        stripBg.setColor(Color.parseColor("#4DFFFFFF"));
         stripBg.setCornerRadius(dp(1));
         vDesktopStrip.setBackground(stripBg);
         vDesktopStrip.setOnClickListener(v -> triggerHome(context));
 
-        LayoutParams lpStrip = new LayoutParams(dp(2), dp(20));
-        lpStrip.setMarginStart(dp(6));
-        lpStrip.setMarginEnd(dp(4));
+        LayoutParams lpStrip = new LayoutParams(dp(2), dp(18));
+        lpStrip.setMarginStart(dp(4));
+        lpStrip.setMarginEnd(dp(2));
         addView(vDesktopStrip, lpStrip);
 
         updateClock();
@@ -163,6 +186,22 @@ public class DeXSystemTrayView extends LinearLayout {
         }
         if (tvDate != null) {
             tvDate.setText(dateFormat.format(now));
+        }
+    }
+
+    private void onNotificationClicked(Context context, View v) {
+        if (ConfigManager.isFloatingPopupsEnabled(context)) {
+            DeXNotificationPopup.show(context, v);
+        } else {
+            expandNotifications(context);
+        }
+    }
+
+    private void onQuickSettingsClicked(Context context, View v) {
+        if (ConfigManager.isFloatingPopupsEnabled(context)) {
+            DeXQuickSettingsPopup.show(context, v);
+        } else {
+            openWifiSettings(context);
         }
     }
 
@@ -187,14 +226,6 @@ public class DeXSystemTrayView extends LinearLayout {
         } catch (Throwable ignored) {}
     }
 
-    private void openBatterySettings(Context context) {
-        try {
-            Intent intent = new Intent(Intent.ACTION_POWER_USAGE_SUMMARY);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(intent);
-        } catch (Throwable ignored) {}
-    }
-
     private void openClock(Context context) {
         try {
             Intent intent = new Intent(Intent.ACTION_QUICK_CLOCK);
@@ -205,6 +236,16 @@ public class DeXSystemTrayView extends LinearLayout {
                 Intent intent = new Intent(Settings.ACTION_DATE_SETTINGS);
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 context.startActivity(intent);
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private void triggerScreenshot(Context context) {
+        try {
+            Runtime.getRuntime().exec(new String[]{"su", "-c", "input keyevent 120"}); // KEYCODE_SYSRQ (Take Screenshot)
+        } catch (Throwable t) {
+            try {
+                Runtime.getRuntime().exec(new String[]{"su", "-c", "screencap -p /sdcard/Pictures/Screenshots/Screenshot_$(date +%Y%m%d_%H%M%S).png"});
             } catch (Throwable ignored) {}
         }
     }
@@ -248,7 +289,7 @@ public class DeXSystemTrayView extends LinearLayout {
         }
     }
 
-    private int dp(int val) {
+    private int dp(float val) {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, val, getResources().getDisplayMetrics());
     }
 }
