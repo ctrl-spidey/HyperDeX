@@ -27,6 +27,7 @@ import com.spiderman4u.hyperdex.config.ConfigManager;
 import com.spiderman4u.hyperdex.config.Constants;
 import com.spiderman4u.hyperdex.views.DeXNavButtonsView;
 import com.spiderman4u.hyperdex.views.DeXSystemTrayView;
+import com.spiderman4u.hyperdex.views.DeXTaskbarView;
 
 import java.lang.reflect.Field;
 
@@ -340,6 +341,25 @@ public class LauncherDockHook {
                             Context context = container.getContext();
                             if (ConfigManager.shouldApplyDeXTaskbar(context)) {
                                 applyDockContainerDeXStyle(container, context);
+                            }
+                        }
+                    }
+                });
+
+                // Suppress stock children during dock layouts
+                XposedBridge.hookAllMethods(cls, "onLayout", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof ViewGroup) {
+                            ViewGroup container = (ViewGroup) param.thisObject;
+                            if (ConfigManager.shouldApplyDeXTaskbar(container.getContext())) {
+                                for (int i = 0; i < container.getChildCount(); i++) {
+                                    View child = container.getChildAt(i);
+                                    if (child != null && child.getId() != R.id.dex_taskbar_view) {
+                                        child.setVisibility(View.GONE);
+                                        child.setAlpha(0f);
+                                    }
+                                }
                             }
                         }
                     }
@@ -877,73 +897,12 @@ public class LauncherDockHook {
             View hotSeatsView = (View) hotSeatsObj;
             Context context = hotSeatsView.getContext();
 
-            int taskbarHeightPx = dp(context, ConfigManager.getTaskbarHeight(context));
-            int navOffset = calculateNavOffset(context);
+            // Option 1: Completely suppress Xiaomi's native HotSeats dock to eliminate
+            // flexbox item stretching and duplicate drawer buttons!
+            hotSeatsView.setVisibility(View.GONE);
+            hotSeatsView.setAlpha(0f);
 
-            // 1. Force outer container layout params
-            Field bgParamField = XposedHelpers.findFieldIfExists(hotSeatsObj.getClass(), "mBackgroundLayoutParam");
-            if (bgParamField != null) {
-                Object paramObj = bgParamField.get(hotSeatsObj);
-                if (paramObj instanceof ViewGroup.MarginLayoutParams) {
-                    ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) paramObj;
-                    lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
-                    lp.height = taskbarHeightPx;
-                    lp.leftMargin = 0;
-                    lp.rightMargin = 0;
-                    lp.bottomMargin = 0;
-                }
-            }
-
-            // 2. Hide inner floating pill background views
-            hideBackgroundField(hotSeatsObj, "mBlurBackground");
-            hideBackgroundField(hotSeatsObj, "mBlurBackground2");
-            hideBackgroundField(hotSeatsObj, "mNormalBackground");
-            hideBackgroundField(hotSeatsObj, "mMiuiXBlurBackground");
-
-            Object listContent = XposedHelpers.getObjectField(hotSeatsObj, "mListContent");
-            if (listContent != null) {
-                hideBackgroundField(listContent, "mContentBackground");
-                if (listContent instanceof View) {
-                    View listContentView = (View) listContent;
-                    listContentView.setBackground(null);
-                    if (listContentView instanceof ViewGroup) {
-                        ViewGroup lcvg = (ViewGroup) listContentView;
-                        lcvg.setClipChildren(false);
-                        lcvg.setClipToPadding(false);
-                    }
-
-                    ViewGroup.LayoutParams listLp = listContentView.getLayoutParams();
-                    if (listLp instanceof FrameLayout.LayoutParams) {
-                        FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) listLp;
-                        flp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
-                        flp.height = taskbarHeightPx;
-                        flp.leftMargin = 0;
-                        flp.rightMargin = 0;
-                        listContentView.setLayoutParams(flp);
-                    }
-                }
-            }
-
-            // 3. Align hotSeatsView to START (after nav buttons)
-            ViewGroup.LayoutParams lp = hotSeatsView.getLayoutParams();
-            if (lp instanceof FrameLayout.LayoutParams) {
-                FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) lp;
-                flp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
-                flp.height = taskbarHeightPx;
-                flp.leftMargin = navOffset;
-                flp.rightMargin = 0;
-                flp.bottomMargin = 0;
-                hotSeatsView.setLayoutParams(flp);
-            }
-            hotSeatsView.setTranslationX(0f);
-            hotSeatsView.setBackground(null);
-            if (hotSeatsView instanceof ViewGroup) {
-                ViewGroup hsvg = (ViewGroup) hotSeatsView;
-                hsvg.setClipChildren(false);
-                hsvg.setClipToPadding(false);
-            }
-
-            // 4. Set DeX background and tray on parent dock container
+            // Set standalone edge-to-edge DeX taskbar on the parent dock container
             ViewParent parent = hotSeatsView.getParent();
             if (parent instanceof ViewGroup) {
                 applyDockContainerDeXStyle((ViewGroup) parent, context);
@@ -960,22 +919,15 @@ public class LauncherDockHook {
             boolean isLaptopOverlay = dockContainer.getClass().getName().contains("laptop.dockbar.DockContainerView");
 
             if (!isLaptopOverlay) {
-                View existingTray = dockContainer.findViewById(R.id.dex_system_tray);
-                if (existingTray != null) {
-                    dockContainer.removeView(existingTray);
-                }
-                View existingNav = dockContainer.findViewById(R.id.dex_nav_buttons);
-                if (existingNav != null) {
-                    dockContainer.removeView(existingNav);
+                View existingTaskbar = dockContainer.findViewById(R.id.dex_taskbar_view);
+                if (existingTaskbar != null) {
+                    dockContainer.removeView(existingTaskbar);
                 }
                 return;
             }
 
             int barHeightDp = ConfigManager.getTaskbarHeight(context);
             int barHeightPx = dp(context, barHeightDp);
-            int opacity = ConfigManager.getTaskbarOpacity(context);
-            int alpha = (int) (opacity * 255 / 100f);
-            int bgColor = Color.argb(alpha, 0x14, 0x15, 0x18);
 
             // Dock Container layout params height & WindowManager update
             ViewGroup.LayoutParams containerLp = dockContainer.getLayoutParams();
@@ -996,72 +948,47 @@ public class LauncherDockHook {
                 }
             }
 
-            // Solid edge-to-edge acrylic taskbar background with crisp 1px top border
-            GradientDrawable topBorder = new GradientDrawable();
-            topBorder.setColor(Color.parseColor("#33FFFFFF"));
-
-            GradientDrawable dexFill = new GradientDrawable();
-            dexFill.setColor(bgColor);
-            dexFill.setCornerRadius(0);
-
-            LayerDrawable layerDrawable = new LayerDrawable(new GradientDrawable[]{topBorder, dexFill});
-            layerDrawable.setLayerInset(1, 0, 1, 0, 0);
-
-            dockContainer.setBackground(layerDrawable);
+            dockContainer.setBackground(null);
             dockContainer.setClipChildren(false);
             dockContainer.setClipToPadding(false);
 
-            // 1. Far-Left Navigation Buttons Zone [ |||  ◯  <  Q  ::: ]
-            View existingNav = dockContainer.findViewById(R.id.dex_nav_buttons);
-            if (existingNav == null) {
-                DeXNavButtonsView navView = new DeXNavButtonsView(context);
-                navView.setId(R.id.dex_nav_buttons);
-                FrameLayout.LayoutParams lpNav = new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
-                        barHeightPx
-                );
-                lpNav.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
-                lpNav.leftMargin = dp(context, 4);
-                dockContainer.addView(navView, lpNav);
-            } else {
-                existingNav.setVisibility(View.VISIBLE);
-                if (existingNav instanceof DeXNavButtonsView) {
-                    ((DeXNavButtonsView) existingNav).updateVisibilityConfig(context);
-                }
-                ViewGroup.LayoutParams lp = existingNav.getLayoutParams();
-                if (lp instanceof FrameLayout.LayoutParams) {
-                    FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) lp;
-                    flp.height = barHeightPx;
-                    flp.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
-                    existingNav.setLayoutParams(flp);
+            // 1. Hide ALL stock children in DockContainerView so only DeXTaskbarView is visible!
+            for (int i = 0; i < dockContainer.getChildCount(); i++) {
+                View child = dockContainer.getChildAt(i);
+                if (child != null && child.getId() != R.id.dex_taskbar_view) {
+                    child.setVisibility(View.GONE);
+                    child.setAlpha(0f);
                 }
             }
 
-            // 2. Far-Right System Tray
-            View existingTray = dockContainer.findViewById(R.id.dex_system_tray);
-            if (existingTray == null) {
-                DeXSystemTrayView tray = new DeXSystemTrayView(context);
-                tray.setId(R.id.dex_system_tray);
-                FrameLayout.LayoutParams lpTray = new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT,
+            // 2. Attach or update DeXTaskbarView edge-to-edge
+            DeXTaskbarView taskbar = dockContainer.findViewById(R.id.dex_taskbar_view);
+            if (taskbar == null) {
+                taskbar = new DeXTaskbarView(context);
+                taskbar.setId(R.id.dex_taskbar_view);
+                FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
                         barHeightPx
                 );
-                lpTray.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
-                lpTray.bottomMargin = 0;
-                lpTray.rightMargin = dp(context, 4);
-                dockContainer.addView(tray, lpTray);
+                lp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
+                dockContainer.addView(taskbar, lp);
             } else {
-                existingTray.setVisibility(View.VISIBLE);
-                ViewGroup.LayoutParams trayLp = existingTray.getLayoutParams();
-                if (trayLp instanceof FrameLayout.LayoutParams) {
-                    FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) trayLp;
-                    flp.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+                taskbar.setVisibility(View.VISIBLE);
+                taskbar.updateStyleAndDimensions(context);
+                ViewGroup.LayoutParams lp = taskbar.getLayoutParams();
+                if (lp instanceof FrameLayout.LayoutParams) {
+                    FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) lp;
                     flp.height = barHeightPx;
-                    flp.bottomMargin = 0;
-                    flp.rightMargin = dp(context, 4);
-                    existingTray.setLayoutParams(flp);
+                    flp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
+                    taskbar.setLayoutParams(flp);
                 }
             }
+
+            // Connect HotSeats instance to dock apps view
+            if (sCurrentHotSeatsInstance != null && taskbar.getDockAppsView() != null) {
+                taskbar.getDockAppsView().setHotSeatsInstance(sCurrentHotSeatsInstance);
+            }
+
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Error in applyDockContainerDeXStyle: " + t);
         }
@@ -1071,20 +998,26 @@ public class LauncherDockHook {
         try {
             if (!(hotSeatsObj instanceof View)) return;
             View hotSeatsView = (View) hotSeatsObj;
+            hotSeatsView.setVisibility(View.VISIBLE);
+            hotSeatsView.setAlpha(1.0f);
 
             ViewParent parent = hotSeatsView.getParent();
             if (parent instanceof ViewGroup) {
                 ViewGroup dockContainer = (ViewGroup) parent;
                 dockContainer.setBackground(null);
 
-                View existingTray = dockContainer.findViewById(R.id.dex_system_tray);
-                if (existingTray != null) {
-                    existingTray.setVisibility(View.GONE);
+                View existingTaskbar = dockContainer.findViewById(R.id.dex_taskbar_view);
+                if (existingTaskbar != null) {
+                    dockContainer.removeView(existingTaskbar);
                 }
 
-                View existingNav = dockContainer.findViewById(R.id.dex_nav_buttons);
-                if (existingNav != null) {
-                    existingNav.setVisibility(View.GONE);
+                // Restore stock children
+                for (int i = 0; i < dockContainer.getChildCount(); i++) {
+                    View child = dockContainer.getChildAt(i);
+                    if (child != null) {
+                        child.setVisibility(View.VISIBLE);
+                        child.setAlpha(1.0f);
+                    }
                 }
             }
 

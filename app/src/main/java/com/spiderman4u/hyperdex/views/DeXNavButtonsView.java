@@ -133,6 +133,23 @@ public class DeXNavButtonsView extends LinearLayout {
 
     private void toggleAppDrawer(Context context) {
         try {
+            Class<?> appClass = Class.forName("com.miui.home.launcher.Application");
+            Method getLauncherMethod = appClass.getMethod("getLauncher");
+            Object launcher = getLauncherMethod.invoke(null);
+            if (launcher != null) {
+                try {
+                    Method showMethod = launcher.getClass().getMethod("showAllApps", boolean.class);
+                    showMethod.invoke(launcher, true);
+                    return;
+                } catch (Throwable t1) {
+                    Method showMethod = launcher.getClass().getMethod("showAllApps");
+                    showMethod.invoke(launcher);
+                    return;
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        try {
             Method showMethod = context.getClass().getMethod("showAllApps", boolean.class);
             showMethod.invoke(context, true);
             return;
