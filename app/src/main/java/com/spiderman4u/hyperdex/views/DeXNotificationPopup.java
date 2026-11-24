@@ -1,6 +1,5 @@
 package com.spiderman4u.hyperdex.views;
 
-import android.app.Notification;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -9,15 +8,10 @@ import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.graphics.drawable.RippleDrawable;
-import android.content.res.ColorStateList;
-import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.util.TypedValue;
-
-import com.spiderman4u.hyperdex.config.ConfigManager;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -27,8 +21,15 @@ import android.widget.PopupWindow;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
+import com.spiderman4u.hyperdex.config.ConfigManager;
+import com.spiderman4u.hyperdex.services.DeXNotificationListener;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -104,7 +105,8 @@ public class DeXNotificationPopup {
         btnClear.setBackground(clearBg);
         btnClear.setOnClickListener(v -> {
             try {
-                Runtime.getRuntime().exec(new String[]{"su", "-c", "cmd statusbar collapse"});
+                Intent intent = new Intent(DeXNotificationListener.ACTION_CLEAR_NOTIFICATIONS);
+                context.sendBroadcast(intent);
             } catch (Throwable ignored) {}
             dismiss();
         });
@@ -122,7 +124,7 @@ public class DeXNotificationPopup {
         // Initial loading/empty state
         populateEmptyState(context, listContainer);
 
-        // Asynchronously load notifications without blocking UI
+        // Asynchronously load notifications
         new Thread(() -> {
             List<SimpleNotificationItem> items = loadRecentNotifications(context);
             new Handler(Looper.getMainLooper()).post(() -> {
@@ -148,6 +150,7 @@ public class DeXNotificationPopup {
         // Max height constraint
         int maxHeight = dp(context, 420);
 
+        // Create PopupWindow
         PopupWindow popup = new PopupWindow(root, width, maxHeight, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
@@ -280,40 +283,27 @@ public class DeXNotificationPopup {
 
     private static List<SimpleNotificationItem> loadRecentNotifications(Context context) {
         List<SimpleNotificationItem> list = new ArrayList<>();
-        try {
-            // Read active notifications via root dumpsys notification (fast 50 lines)
-            Process p = Runtime.getRuntime().exec(new String[]{"su", "-c", "dumpsys notification --noredact | grep -E 'opPkg=|android.title=|android.text=' | head -30"});
-            BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
-            String line;
-            SimpleNotificationItem current = null;
+        File file = new File(DeXNotificationListener.NOTIF_FILE_PATH);
+        if (file.exists() && file.canRead()) {
+            try {
+                FileInputStream fis = new FileInputStream(file);
+                byte[] data = new byte[(int) file.length()];
+                fis.read(data);
+                fis.close();
 
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                if (line.startsWith("opPkg=")) {
-                    if (current != null && current.packageName != null) {
-                        list.add(current);
-                    }
-                    current = new SimpleNotificationItem();
-                    current.packageName = line.substring(6).trim();
-                } else if (line.startsWith("android.title=") && current != null) {
-                    String title = line.substring(14).trim();
-                    if (title.startsWith("String (") && title.endsWith(")")) {
-                        title = title.substring(8, title.length() - 1);
-                    }
-                    current.title = title;
-                } else if (line.startsWith("android.text=") && current != null) {
-                    String text = line.substring(13).trim();
-                    if (text.startsWith("String (") && text.endsWith(")")) {
-                        text = text.substring(8, text.length() - 1);
-                    }
-                    current.text = text;
+                String jsonStr = new String(data, StandardCharsets.UTF_8);
+                JSONArray array = new JSONArray(jsonStr);
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject obj = array.getJSONObject(i);
+                    SimpleNotificationItem item = new SimpleNotificationItem();
+                    item.packageName = obj.optString("pkg");
+                    item.title = obj.optString("title");
+                    item.text = obj.optString("text");
+                    item.time = obj.optString("time");
+                    list.add(item);
                 }
-            }
-            if (current != null && current.packageName != null && !list.contains(current)) {
-                list.add(current);
-            }
-            reader.close();
-        } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {}
+        }
         return list;
     }
 

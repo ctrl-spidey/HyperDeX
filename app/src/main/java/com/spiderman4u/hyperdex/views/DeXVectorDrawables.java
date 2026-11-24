@@ -151,6 +151,21 @@ public class DeXVectorDrawables {
     public static final String PATH_TORCH =
             "M6,2h12v3l-3,3v14H9V8L6,5V2zm2,2v0.6l2.4,2.4H13.6L16,4.6V4H8z";
 
+    public static final String PATH_AUTO_ROTATE =
+            "M16.48,2.52c3.27,1.55 5.61,4.72 5.97,8.48h1.5C23.44,4.84 18.29,0 12,0l-.66.03 3.81,3.81 1.33,-1.32zM7.52,21.48C4.25,19.94 1.91,16.76 1.55,13H.05C.56,19.16 5.71,24 12,24l.66,-.03 -3.81,-3.81 -1.33,1.32zM12,4c-4.42,0 -8,3.58 -8,8s3.58,8 8,8 8,-3.58 8,-8 -3.58,-8 -8,-8z";
+
+    public static final String PATH_AIRPLANE =
+            "M21,16v-2l-8,-5V3.5c0,-0.83 -0.67,-1.5 -1.5,-1.5S10,2.67 10,3.5V9l-8,5v2l8,-2.5V19l-2,1.5V22l3.5,-1 3.5,1v-1.5L13,19v-5.5l8,2.5z";
+
+    public static final String PATH_DARK_MODE =
+            "M12.3,2a10,10 0 0,0 -1.9,0.18 10,10 0 0,0 -7.22,7.22 10,10 0 0,0 2.08,9.72 10,10 0 0,0 9.72,2.08 10,10 0 0,0 7.22,-7.22 10,10 0 0,0 0.18,-1.9 1,1 0 0,0 -1.6,-0.8 7.94,7.94 0 0,1 -6.8,-6.8 1,1 0 0,0 -0.8,-1.6z";
+
+    public static final String PATH_POWER =
+            "M13,3h-2v10h2V3zm4.83,2.17l-1.42,1.42C17.99,7.86 19,9.81 19,12c0,3.87 -3.13,7 -7,7s-7,-3.13 -7,-7c0,-2.19 1.01,-4.14 2.58,-5.42L6.17,5.17C4.23,6.82 3,9.26 3,12c0,4.97 4.03,9 9,9s9,-4.03 9,-9c0,-2.74 -1.23,-5.18 -3.17,-6.83z";
+
+    public static final String PATH_VIBRATE =
+            "M0,15h2V9H0v6zm3,2h2V7H3v10zm19,-8v6h2V9h-2zm-3,8h2V7h-2v10zM16.5,3h-9C6.67,3 6,3.67 6,4.5v15c0,0.83 0.67,1.5 1.5,1.5h9c0.83,0 1.5,-0.67 1.5,-1.5v-15c0,-0.83 -0.67,-1.5 -1.5,-1.5zM16,19H8V5h8v14z";
+
     public static SvgPathDrawable createWifiDrawable(int color) {
         return new SvgPathDrawable(PATH_WIFI, color, 24, 24);
     }
@@ -207,6 +222,26 @@ public class DeXVectorDrawables {
         return new SvgPathDrawable(PATH_TORCH, color, 24, 24);
     }
 
+    public static SvgPathDrawable createAutoRotateDrawable(int color) {
+        return new SvgPathDrawable(PATH_AUTO_ROTATE, color, 24, 24);
+    }
+
+    public static SvgPathDrawable createAirplaneDrawable(int color) {
+        return new SvgPathDrawable(PATH_AIRPLANE, color, 24, 24);
+    }
+
+    public static SvgPathDrawable createDarkModeDrawable(int color) {
+        return new SvgPathDrawable(PATH_DARK_MODE, color, 24, 24);
+    }
+
+    public static SvgPathDrawable createPowerDrawable(int color) {
+        return new SvgPathDrawable(PATH_POWER, color, 24, 24);
+    }
+
+    public static SvgPathDrawable createVibrateDrawable(int color) {
+        return new SvgPathDrawable(PATH_VIBRATE, color, 24, 24);
+    }
+
     /**
      * Authentic Samsung DeX Horizontal Battery Capsule Drawable
      * Body pill + tip + level fill + green charging lightning bolt
@@ -254,42 +289,35 @@ public class DeXVectorDrawables {
 
             float w = bounds.width();
             float h = bounds.height();
-            float stroke = Math.max(1.5f, h * 0.1f);
-            strokePaint.setStrokeWidth(stroke);
+            float strokeW = Math.max(1.5f, h * 0.1f);
+            strokePaint.setStrokeWidth(strokeW);
 
-            float bodyWidth = w * 0.82f;
-            float bodyHeight = h * 0.58f;
-            float top = bounds.top + (h - bodyHeight) / 2f;
-            float left = bounds.left + stroke / 2f;
+            float tipW = w * 0.08f;
+            float tipH = h * 0.38f;
+            float bodyW = w - tipW - strokeW;
+            float bodyH = h - strokeW * 2;
 
-            // Outer battery body capsule
-            bodyRect.set(left, top, left + bodyWidth, top + bodyHeight);
-            float radius = bodyHeight * 0.24f;
+            bodyRect.set(bounds.left + strokeW, bounds.top + strokeW, bounds.left + strokeW + bodyW, bounds.top + strokeW + bodyH);
+            float radius = h * 0.22f;
             canvas.drawRoundRect(bodyRect, radius, radius, strokePaint);
 
-            // Battery positive tip on right
-            float tipW = w * 0.08f;
-            float tipH = bodyHeight * 0.44f;
-            float tipTop = bounds.top + (h - tipH) / 2f;
-            float tipLeft = bodyRect.right + stroke * 0.5f;
-            tipRect.set(tipLeft, tipTop, tipLeft + tipW, tipTop + tipH);
+            tipRect.set(bounds.left + strokeW + bodyW, bounds.top + (h - tipH) / 2f, bounds.right - strokeW / 2f, bounds.top + (h + tipH) / 2f);
             canvas.drawRoundRect(tipRect, radius * 0.5f, radius * 0.5f, fillPaint);
 
-            // Inner fill
-            float inset = stroke * 1.5f;
-            float availableFillWidth = (bodyRect.width() - inset * 2f);
-            float currentFillWidth = availableFillWidth * (level / 100f);
-            if (currentFillWidth > 1f) {
-                fillRect.set(bodyRect.left + inset, bodyRect.top + inset, bodyRect.left + inset + currentFillWidth, bodyRect.bottom - inset);
-                canvas.drawRoundRect(fillRect, radius * 0.5f, radius * 0.5f, fillPaint);
+            float pad = strokeW * 1.5f;
+            float maxFillW = bodyW - pad * 2;
+            float curFillW = maxFillW * (level / 100f);
+
+            if (curFillW > 0) {
+                fillRect.set(bodyRect.left + pad, bodyRect.top + pad, bodyRect.left + pad + curFillW, bodyRect.bottom - pad);
+                canvas.drawRoundRect(fillRect, radius * 0.6f, radius * 0.6f, fillPaint);
             }
 
-            // Charging lightning bolt indicator
             if (isCharging) {
                 float cx = bodyRect.centerX();
                 float cy = bodyRect.centerY();
-                float bh = bodyHeight * 0.75f;
-                float bw = bh * 0.55f;
+                float bw = bodyW * 0.35f;
+                float bh = bodyH * 0.7f;
 
                 boltPath.reset();
                 boltPath.moveTo(cx + bw * 0.1f, cy - bh * 0.5f);
@@ -321,16 +349,6 @@ public class DeXVectorDrawables {
         @Override
         public int getOpacity() {
             return PixelFormat.TRANSLUCENT;
-        }
-
-        @Override
-        public int getIntrinsicWidth() {
-            return 24;
-        }
-
-        @Override
-        public int getIntrinsicHeight() {
-            return 14;
         }
     }
 }

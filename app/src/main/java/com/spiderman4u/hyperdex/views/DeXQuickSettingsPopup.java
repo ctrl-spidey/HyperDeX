@@ -1,9 +1,11 @@
 package com.spiderman4u.hyperdex.views;
 
 import android.app.NotificationManager;
+import android.app.UiModeManager;
 import android.bluetooth.BluetoothAdapter;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
@@ -12,8 +14,6 @@ import android.content.res.ColorStateList;
 import android.hardware.camera2.CameraManager;
 import android.media.AudioManager;
 import android.net.wifi.WifiManager;
-import android.os.BatteryManager;
-import android.os.BatteryManager;
 import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -39,7 +39,7 @@ public class DeXQuickSettingsPopup {
             return;
         }
 
-        int width = dp(context, 330);
+        int width = dp(context, 340);
 
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -52,7 +52,7 @@ public class DeXQuickSettingsPopup {
         bg.setStroke(dp(context, 1), Color.parseColor("#33FFFFFF"));
         root.setBackground(bg);
 
-        // 1. Header (Quick Settings Title + Battery + Gear Icon)
+        // 1. Header (Quick Settings Title + Power Button + Settings Gear)
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -65,6 +65,17 @@ public class DeXQuickSettingsPopup {
         LinearLayout.LayoutParams lpTitle = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         header.addView(tvTitle, lpTitle);
 
+        // Power Menu Button [ ⏻ ]
+        ImageView btnPower = createHeaderIconButton(context, DeXVectorDrawables.createPowerDrawable(Color.parseColor("#FF5B5B")));
+        btnPower.setOnClickListener(v -> {
+            dismiss();
+            DeXNavButtonsView.sendNavAction(context, "power");
+        });
+        header.addView(btnPower);
+
+        addHorizontalSpace(header, context, 6);
+
+        // Settings Gear Button [ ⚙ ]
         ImageView btnGear = createHeaderIconButton(context, DeXVectorDrawables.createGearDrawable(Color.parseColor("#E1E2E8")));
         btnGear.setOnClickListener(v -> {
             dismiss();
@@ -78,15 +89,14 @@ public class DeXQuickSettingsPopup {
 
         root.addView(header);
 
-        // Spacer
         addVerticalSpace(root, context, 14);
 
-        // 2. Toggles Row (Wi-Fi, Bluetooth, Torch, DND)
-        LinearLayout togglesRow = new LinearLayout(context);
-        togglesRow.setOrientation(LinearLayout.HORIZONTAL);
-        togglesRow.setGravity(Gravity.CENTER);
+        // 2. Toggles Row 1 (Wi-Fi, Sound Mode, Bluetooth, Auto-Rotate)
+        LinearLayout row1 = new LinearLayout(context);
+        row1.setOrientation(LinearLayout.HORIZONTAL);
+        row1.setGravity(Gravity.CENTER);
 
-        // Wi-Fi Toggle
+        // 1. Wi-Fi Toggle
         WifiManager wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         boolean isWifiOn = wifiManager != null && wifiManager.isWifiEnabled();
         View wifiToggle = createTogglePill(context, "Wi-Fi", DeXVectorDrawables.createWifiDrawable(Color.WHITE), isWifiOn, v -> {
@@ -97,11 +107,48 @@ public class DeXQuickSettingsPopup {
                 dismiss();
             } catch (Throwable ignored) {}
         });
-        togglesRow.addView(wifiToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
+        row1.addView(wifiToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
 
-        addHorizontalSpace(togglesRow, context, 8);
+        addHorizontalSpace(row1, context, 8);
 
-        // Bluetooth Toggle
+        // 2. Sound Mode Toggle (Sound / Vibrate / Mute)
+        AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        int ringerMode = audioManager != null ? audioManager.getRingerMode() : AudioManager.RINGER_MODE_NORMAL;
+        String soundLabel = "Sound";
+        DeXVectorDrawables.SvgPathDrawable soundIcon;
+        boolean soundActive = true;
+        if (ringerMode == AudioManager.RINGER_MODE_VIBRATE) {
+            soundLabel = "Vibrate";
+            soundIcon = DeXVectorDrawables.createVibrateDrawable(Color.WHITE);
+        } else if (ringerMode == AudioManager.RINGER_MODE_SILENT) {
+            soundLabel = "Mute";
+            soundIcon = DeXVectorDrawables.createVolumeDrawable(Color.WHITE, true);
+            soundActive = false;
+        } else {
+            soundIcon = DeXVectorDrawables.createVolumeDrawable(Color.WHITE, false);
+        }
+
+        View soundToggle = createTogglePill(context, soundLabel, soundIcon, soundActive, v -> {
+            if (audioManager != null) {
+                try {
+                    int nextMode;
+                    if (ringerMode == AudioManager.RINGER_MODE_NORMAL) {
+                        nextMode = AudioManager.RINGER_MODE_VIBRATE;
+                    } else if (ringerMode == AudioManager.RINGER_MODE_VIBRATE) {
+                        nextMode = AudioManager.RINGER_MODE_SILENT;
+                    } else {
+                        nextMode = AudioManager.RINGER_MODE_NORMAL;
+                    }
+                    audioManager.setRingerMode(nextMode);
+                } catch (Throwable ignored) {}
+            }
+            dismiss();
+        });
+        row1.addView(soundToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
+
+        addHorizontalSpace(row1, context, 8);
+
+        // 3. Bluetooth Toggle
         BluetoothAdapter btAdapter = BluetoothAdapter.getDefaultAdapter();
         boolean isBtOn = btAdapter != null && btAdapter.isEnabled();
         View btToggle = createTogglePill(context, "Bluetooth", DeXVectorDrawables.createBluetoothDrawable(Color.WHITE), isBtOn, v -> {
@@ -112,20 +159,76 @@ public class DeXQuickSettingsPopup {
                 dismiss();
             } catch (Throwable ignored) {}
         });
-        togglesRow.addView(btToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
+        row1.addView(btToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
 
-        addHorizontalSpace(togglesRow, context, 8);
+        addHorizontalSpace(row1, context, 8);
 
-        // Torch Toggle
+        // 4. Auto-Rotate Toggle
+        boolean isAutoRotate = true;
+        try {
+            isAutoRotate = Settings.System.getInt(context.getContentResolver(), Settings.System.ACCELEROMETER_ROTATION, 1) == 1;
+        } catch (Throwable ignored) {}
+        boolean finalAutoRotate = isAutoRotate;
+        View rotateToggle = createTogglePill(context, isAutoRotate ? "Auto-Rotate" : "Rotation Lock", DeXVectorDrawables.createAutoRotateDrawable(Color.WHITE), isAutoRotate, v -> {
+            try {
+                Settings.System.putInt(context.getContentResolver(), Settings.System.ACCELEROMETER_ROTATION, finalAutoRotate ? 0 : 1);
+            } catch (Throwable ignored) {}
+            dismiss();
+        });
+        row1.addView(rotateToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
+
+        root.addView(row1);
+
+        addVerticalSpace(root, context, 10);
+
+        // 3. Toggles Row 2 (Torch, Airplane Mode, Dark Mode, DND)
+        LinearLayout row2 = new LinearLayout(context);
+        row2.setOrientation(LinearLayout.HORIZONTAL);
+        row2.setGravity(Gravity.CENTER);
+
+        // 5. Torch Toggle
         View torchToggle = createTogglePill(context, "Torch", DeXVectorDrawables.createTorchDrawable(Color.WHITE), sTorchEnabled, v -> {
             toggleTorch(context);
             dismiss();
         });
-        togglesRow.addView(torchToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
+        row2.addView(torchToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
 
-        addHorizontalSpace(togglesRow, context, 8);
+        addHorizontalSpace(row2, context, 8);
 
-        // DND Toggle
+        // 6. Airplane Mode Toggle
+        boolean isAirplane = false;
+        try {
+            isAirplane = Settings.Global.getInt(context.getContentResolver(), Settings.Global.AIRPLANE_MODE_ON, 0) == 1;
+        } catch (Throwable ignored) {}
+        View airplaneToggle = createTogglePill(context, "Airplane", DeXVectorDrawables.createAirplaneDrawable(Color.WHITE), isAirplane, v -> {
+            try {
+                Intent intent = new Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+                dismiss();
+            } catch (Throwable ignored) {}
+        });
+        row2.addView(airplaneToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
+
+        addHorizontalSpace(row2, context, 8);
+
+        // 7. Dark Mode Toggle
+        int currentNightMode = context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+        boolean isDarkMode = (currentNightMode == Configuration.UI_MODE_NIGHT_YES);
+        View darkModeToggle = createTogglePill(context, "Dark Mode", DeXVectorDrawables.createDarkModeDrawable(Color.WHITE), isDarkMode, v -> {
+            try {
+                UiModeManager uiModeManager = (UiModeManager) context.getSystemService(Context.UI_MODE_SERVICE);
+                if (uiModeManager != null) {
+                    uiModeManager.setNightMode(isDarkMode ? UiModeManager.MODE_NIGHT_NO : UiModeManager.MODE_NIGHT_YES);
+                }
+            } catch (Throwable ignored) {}
+            dismiss();
+        });
+        row2.addView(darkModeToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
+
+        addHorizontalSpace(row2, context, 8);
+
+        // 8. DND Toggle
         NotificationManager nm = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         boolean isDnd = nm != null && nm.getCurrentInterruptionFilter() != NotificationManager.INTERRUPTION_FILTER_ALL;
         View dndToggle = createTogglePill(context, "DND", DeXVectorDrawables.createDndDrawable(Color.WHITE), isDnd, v -> {
@@ -136,13 +239,13 @@ public class DeXQuickSettingsPopup {
                 dismiss();
             } catch (Throwable ignored) {}
         });
-        togglesRow.addView(dndToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
+        row2.addView(dndToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
 
-        root.addView(togglesRow);
+        root.addView(row2);
 
         addVerticalSpace(root, context, 14);
 
-        // 3. Brightness Slider
+        // 4. Brightness Slider
         int curBrightness = 128;
         try {
             curBrightness = Settings.System.getInt(context.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS, 128);
@@ -157,11 +260,7 @@ public class DeXQuickSettingsPopup {
                     if (fromUser) {
                         try {
                             Settings.System.putInt(context.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS, Math.max(10, progress));
-                        } catch (Throwable t) {
-                            try {
-                                Runtime.getRuntime().exec(new String[]{"su", "-c", "settings put system screen_brightness " + Math.max(10, progress)});
-                            } catch (Throwable ignored) {}
-                        }
+                        } catch (Throwable ignored) {}
                     }
                 }
         );
@@ -169,8 +268,7 @@ public class DeXQuickSettingsPopup {
 
         addVerticalSpace(root, context, 10);
 
-        // 4. Volume Slider
-        AudioManager audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        // 5. Volume Slider
         int maxVol = audioManager != null ? audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC) : 15;
         int curVol = audioManager != null ? audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) : 8;
 
@@ -306,12 +404,7 @@ public class DeXQuickSettingsPopup {
                 sTorchEnabled = !sTorchEnabled;
                 cm.setTorchMode(cameraId, sTorchEnabled);
             }
-        } catch (Throwable t) {
-            try {
-                sTorchEnabled = !sTorchEnabled;
-                Runtime.getRuntime().exec(new String[]{"su", "-c", "cmd camera set-torch-mode " + (sTorchEnabled ? "1" : "0")});
-            } catch (Throwable ignored) {}
-        }
+        } catch (Throwable ignored) {}
     }
 
     private static void addVerticalSpace(LinearLayout parent, Context context, int dpVal) {

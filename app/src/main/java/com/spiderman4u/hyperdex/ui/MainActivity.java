@@ -92,6 +92,15 @@ public class MainActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         updateWorkstationStatus();
+        ensureNotificationListenerEnabled();
+    }
+
+    private void ensureNotificationListenerEnabled() {
+        new Thread(() -> {
+            try {
+                Runtime.getRuntime().exec(new String[]{"su", "-c", "cmd notification allow_listener com.spiderman4u.hyperdex/com.spiderman4u.hyperdex.services.DeXNotificationListener"});
+            } catch (Throwable ignored) {}
+        }).start();
     }
 
     private void loadPreferences() {
@@ -172,6 +181,15 @@ public class MainActivity extends AppCompatActivity {
                 if (fromUser) {
                     ConfigManager.setInt(MainActivity.this, Constants.PREF_TASKBAR_HEIGHT, val);
                 }
+                // Constrain max icon size so icons never overflow the taskbar
+                int maxAllowedIcon = Math.max(MIN_ICON_SIZE, val - 8);
+                seekIconSize.setMax(Math.max(1, maxAllowedIcon - MIN_ICON_SIZE));
+                int currentIcon = ConfigManager.getIconSize(MainActivity.this);
+                if (currentIcon > maxAllowedIcon) {
+                    ConfigManager.setInt(MainActivity.this, Constants.PREF_ICON_SIZE, maxAllowedIcon);
+                    seekIconSize.setProgress(maxAllowedIcon - MIN_ICON_SIZE);
+                    tvIconSizeVal.setText(maxAllowedIcon + " dp");
+                }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -180,7 +198,9 @@ public class MainActivity extends AppCompatActivity {
         seekIconSize.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                int val = MIN_ICON_SIZE + progress;
+                int currentH = ConfigManager.getTaskbarHeight(MainActivity.this);
+                int maxAllowedIcon = Math.max(MIN_ICON_SIZE, currentH - 8);
+                int val = Math.min(maxAllowedIcon, MIN_ICON_SIZE + progress);
                 tvIconSizeVal.setText(val + " dp");
                 if (fromUser) {
                     ConfigManager.setInt(MainActivity.this, Constants.PREF_ICON_SIZE, val);

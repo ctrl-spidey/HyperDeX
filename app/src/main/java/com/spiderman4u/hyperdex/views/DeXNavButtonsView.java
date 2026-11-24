@@ -15,6 +15,9 @@ import android.widget.LinearLayout;
 
 import com.spiderman4u.hyperdex.R;
 import com.spiderman4u.hyperdex.config.ConfigManager;
+import com.spiderman4u.hyperdex.hooks.SystemUIHook;
+
+import java.lang.reflect.Method;
 
 public class DeXNavButtonsView extends LinearLayout {
 
@@ -47,28 +50,31 @@ public class DeXNavButtonsView extends LinearLayout {
         btnRecents = createIconButton(context, btnSize, iconPadding);
         btnRecents.setId(R.id.dex_btn_recents);
         btnRecents.setImageDrawable(DeXVectorDrawables.createRecentsDrawable(iconColor));
-        btnRecents.setOnClickListener(v -> sendKeyEvent(187)); // KEYCODE_APP_SWITCH
+        btnRecents.setOnClickListener(v -> sendNavAction(context, "recents"));
         addView(btnRecents);
 
         // 2. Home Button [ ◯ ]
         btnHome = createIconButton(context, btnSize, iconPadding);
         btnHome.setId(R.id.dex_btn_home);
         btnHome.setImageDrawable(DeXVectorDrawables.createHomeDrawable(iconColor));
-        btnHome.setOnClickListener(v -> triggerHome(context));
+        btnHome.setOnClickListener(v -> {
+            sendNavAction(context, "home");
+            triggerHome(context);
+        });
         addView(btnHome);
 
         // 3. Back Button [ < ]
         btnBack = createIconButton(context, btnSize, iconPadding);
         btnBack.setId(R.id.dex_btn_back);
         btnBack.setImageDrawable(DeXVectorDrawables.createBackDrawable(iconColor));
-        btnBack.setOnClickListener(v -> sendKeyEvent(4)); // KEYCODE_BACK
+        btnBack.setOnClickListener(v -> sendNavAction(context, "back"));
         addView(btnBack);
 
         // 4. Search Button [ Q ]
         btnSearch = createIconButton(context, btnSize, iconPadding);
         btnSearch.setId(R.id.dex_btn_search);
         btnSearch.setImageDrawable(DeXVectorDrawables.createSearchDrawable(iconColor));
-        btnSearch.setOnClickListener(v -> sendKeyEvent(84)); // KEYCODE_SEARCH
+        btnSearch.setOnClickListener(v -> sendNavAction(context, "search"));
         addView(btnSearch);
 
         // 5. Apps Drawer Button [ ::: ]
@@ -98,7 +104,6 @@ public class DeXNavButtonsView extends LinearLayout {
         iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
         iv.setPadding(padding, padding, padding, padding);
 
-        // Subtle translucent hover/touch ripple background
         GradientDrawable mask = new GradientDrawable();
         mask.setColor(Color.WHITE);
         mask.setCornerRadius(dp(8));
@@ -121,30 +126,34 @@ public class DeXNavButtonsView extends LinearLayout {
         try {
             Intent intent = new Intent(Intent.ACTION_MAIN);
             intent.addCategory(Intent.CATEGORY_HOME);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
             context.startActivity(intent);
-        } catch (Throwable t) {
-            sendKeyEvent(3); // KEYCODE_HOME
-        }
+        } catch (Throwable ignored) {}
     }
 
     private void toggleAppDrawer(Context context) {
         try {
-            // Xiaomi launcher app drawer key or intent
-            Intent intent = new Intent("com.miui.home.action.ALL_APPS");
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(intent);
-        } catch (Throwable t) {
-            sendKeyEvent(82); // KEYCODE_MENU or toggle
-        }
+            Method showMethod = context.getClass().getMethod("showAllApps", boolean.class);
+            showMethod.invoke(context, true);
+            return;
+        } catch (Throwable ignored) {}
+
+        try {
+            Method showMethod = context.getClass().getMethod("showAllApps");
+            showMethod.invoke(context);
+            return;
+        } catch (Throwable ignored) {}
+
+        // Fallback: send menu / search key via SystemUI
+        sendNavAction(context, "search");
     }
 
-    private void sendKeyEvent(int keyCode) {
-        new Thread(() -> {
-            try {
-                Runtime.getRuntime().exec(new String[]{"su", "-c", "input keyevent " + keyCode});
-            } catch (Throwable ignored) {}
-        }).start();
+    public static void sendNavAction(Context context, String action) {
+        try {
+            Intent intent = new Intent(SystemUIHook.ACTION_NAV_TRIGGER);
+            intent.putExtra(SystemUIHook.EXTRA_NAV_ACTION, action);
+            context.sendBroadcast(intent);
+        } catch (Throwable ignored) {}
     }
 
     private int dp(float val) {

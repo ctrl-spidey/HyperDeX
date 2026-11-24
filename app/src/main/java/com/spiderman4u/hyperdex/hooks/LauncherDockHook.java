@@ -623,7 +623,9 @@ public class LauncherDockHook {
                                 stripBackgrounds(itemView);
 
                                 int barHeight = dp(context, ConfigManager.getTaskbarHeight(context));
-                                int iconSize = dp(context, ConfigManager.getIconSize(context));
+                                int rawIconSize = dp(context, ConfigManager.getIconSize(context));
+                                int maxSafeIconPx = Math.max(dp(context, 18), barHeight - dp(context, 8));
+                                int iconSize = Math.min(rawIconSize, maxSafeIconPx);
                                 int spacing = dp(context, ConfigManager.getIconSpacing(context));
 
                                 ViewGroup.LayoutParams lp = itemView.getLayoutParams();
@@ -641,7 +643,11 @@ public class LauncherDockHook {
                                 itemView.setPivotX((iconSize + spacing * 2) / 2f);
                                 itemView.setPivotY(barHeight / 2f);
 
-                                resizeIconViews(itemView, iconSize);
+                                if (itemView.getParent() instanceof ViewGroup) {
+                                    ViewGroup parentVg = (ViewGroup) itemView.getParent();
+                                    parentVg.setClipChildren(false);
+                                    parentVg.setClipToPadding(false);
+                                }
                             }
                         }
                     }
@@ -658,7 +664,9 @@ public class LauncherDockHook {
                                 stripBackgrounds(itemView);
 
                                 int barHeight = dp(context, ConfigManager.getTaskbarHeight(context));
-                                int iconSize = dp(context, ConfigManager.getIconSize(context));
+                                int rawIconSize = dp(context, ConfigManager.getIconSize(context));
+                                int maxSafeIconPx = Math.max(dp(context, 18), barHeight - dp(context, 8));
+                                int iconSize = Math.min(rawIconSize, maxSafeIconPx);
                                 int spacing = dp(context, ConfigManager.getIconSpacing(context));
 
                                 ViewGroup.LayoutParams lp = itemView.getLayoutParams();
@@ -676,7 +684,11 @@ public class LauncherDockHook {
                                 itemView.setPivotX((iconSize + spacing * 2) / 2f);
                                 itemView.setPivotY(barHeight / 2f);
 
-                                resizeIconViews(itemView, iconSize);
+                                if (itemView.getParent() instanceof ViewGroup) {
+                                    ViewGroup parentVg = (ViewGroup) itemView.getParent();
+                                    parentVg.setClipChildren(false);
+                                    parentVg.setClipToPadding(false);
+                                }
                             }
                         }
                     }

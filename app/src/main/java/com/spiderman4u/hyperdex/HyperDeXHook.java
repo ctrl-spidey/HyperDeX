@@ -2,6 +2,7 @@ package com.spiderman4u.hyperdex;
 
 import com.spiderman4u.hyperdex.config.Constants;
 import com.spiderman4u.hyperdex.hooks.LauncherDockHook;
+import com.spiderman4u.hyperdex.hooks.SystemUIHook;
 import com.spiderman4u.hyperdex.hooks.WindowCaptionHook;
 
 import de.robv.android.xposed.IXposedHookInitPackageResources;
@@ -31,6 +32,11 @@ public class HyperDeXHook implements IXposedHookLoadPackage, IXposedHookInitPack
                 WindowCaptionHook.init(lpparam);
             } catch (Throwable t) {
                 XposedBridge.log(TAG + "Error initializing WindowCaptionHook: " + t);
+            }
+            try {
+                SystemUIHook.init(lpparam);
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "Error initializing SystemUIHook: " + t);
             }
         }
     }
