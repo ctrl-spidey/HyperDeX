@@ -5,6 +5,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.database.ContentObserver;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -64,6 +65,8 @@ public class WindowCaptionHook {
     private static final Map<View, TaskData> sTaskDataMap = new WeakHashMap<>();
     private static final Map<Object, Object> sHostToDotMap = new WeakHashMap<>();
     private static final Map<Object, TaskData> sDotToTaskDataMap = new WeakHashMap<>();
+    private static final Map<Object, Object> sTouchListenerToDotMap = new WeakHashMap<>();
+    private static volatile Object sLastActiveDotObj = null;
 
     public static void init(XC_LoadPackage.LoadPackageParam lpparam) {
         hookMiuiDecorationDot(lpparam);
@@ -85,106 +88,37 @@ public class WindowCaptionHook {
                     lpparam.classLoader
             );
             if (dotCls != null) {
-                // 1. relayout: link TaskInfo and ViewHost
+                // 1. relayout: link TaskInfo and ViewHost BEFORE and AFTER
                 XposedBridge.hookAllMethods(dotCls, "relayout", new XC_MethodHook() {
                     @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        linkDotAndHost(param.thisObject, param.args);
+                    }
+
+                    @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        Object dotObj = param.thisObject;
-                        int taskId = -1;
-                        String appName = null;
-
-                        Object taskInfo = null;
-                        try {
-                            taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
-                        } catch (Throwable ignored) {}
-                        if (taskInfo == null) {
-                            try {
-                                taskInfo = XposedHelpers.getObjectField(dotObj, "mTaskInfo");
-                            } catch (Throwable ignored) {}
-                        }
-                        if (taskInfo == null && param.args.length > 0) {
-                            for (Object arg : param.args) {
-                                if (arg != null && arg.getClass().getName().contains("TaskInfo")) {
-                                    taskInfo = arg;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (taskInfo != null) {
-                            try {
-                                taskId = XposedHelpers.getIntField(taskInfo, "taskId");
-                            } catch (Throwable ignored) {}
-                            try {
-                                ComponentName topActivity = (ComponentName) XposedHelpers.getObjectField(taskInfo, "topActivity");
-                                if (topActivity != null) {
-                                    appName = topActivity.getPackageName();
-                                }
-                            } catch (Throwable ignored) {}
-                        }
-
-                        TaskData taskData = new TaskData(taskId, appName, dotObj);
-                        sDotToTaskDataMap.put(dotObj, taskData);
-
-                        // Associate host with dot controller
-                        try {
-                            Object host = XposedHelpers.getObjectField(dotObj, "mMiuiDecorationRootViewHost");
-                            if (host != null) {
-                                sHostToDotMap.put(host, dotObj);
-                                try {
-                                    View dotView = (View) XposedHelpers.callMethod(host, "getRootView");
-                                    if (dotView != null) {
-                                        sTaskDataMap.put(dotView, taskData);
-                                        dotView.invalidate();
-                                    }
-                                } catch (Throwable ignored) {}
-                            }
-                        } catch (Throwable ignored) {}
-
-                        // Secondary discovery of DotView
-                        for (Field f : dotObj.getClass().getDeclaredFields()) {
-                            try {
-                                f.setAccessible(true);
-                                Object v = f.get(dotObj);
-                                if (v instanceof View && v.getClass().getName().contains("MiuiDecorationDotView")) {
-                                    sTaskDataMap.put((View) v, taskData);
-                                    ((View) v).invalidate();
-                                    break;
-                                }
-                            } catch (Throwable ignored) {}
-                        }
+                        linkDotAndHost(param.thisObject, param.args);
                     }
                 });
 
-                // 2. updateTopCaptionSurface: position at (0, 0) and crop to task bounds width
+                // 2. updateViews: ensure host mapping is established right before surface dimensions are read
+                XposedBridge.hookAllMethods(dotCls, "updateViews", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        linkDotAndHost(param.thisObject, null);
+                    }
+                });
+
+                // 3. updateTopCaptionSurface: position at (0, 0) and crop to task bounds width
                 XposedBridge.hookAllMethods(dotCls, "updateTopCaptionSurface", new XC_MethodHook() {
                     @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        applySurfacePositionAndCrop(param.thisObject, param.args);
+                    }
+
+                    @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        Object dotObj = param.thisObject;
-                        Context context = null;
-                        try {
-                            context = (Context) XposedHelpers.getObjectField(dotObj, "mContext");
-                        } catch (Throwable ignored) {}
-
-                        if (context == null || !ConfigManager.isClassicWindowControlsEnabled(context)) {
-                            return;
-                        }
-
-                        if (param.args.length >= 2 && param.args[1] instanceof Rect) {
-                            Object t = param.args[0]; // SurfaceControl.Transaction
-                            Rect taskBounds = (Rect) param.args[1];
-                            Object surface = null;
-                            try {
-                                surface = XposedHelpers.getObjectField(dotObj, "mCaptionContainerSurface");
-                            } catch (Throwable ignored) {}
-
-                            if (t != null && surface != null && taskBounds.width() > 0) {
-                                int h = dp(context, 32);
-                                XposedHelpers.callMethod(t, "setPosition", surface, 0f, 0f);
-                                XposedHelpers.callMethod(t, "setWindowCrop", surface, taskBounds.width(), h);
-                                XposedHelpers.callMethod(t, "apply");
-                            }
-                        }
+                        applySurfacePositionAndCrop(param.thisObject, param.args);
                     }
                 });
 
@@ -195,13 +129,116 @@ public class WindowCaptionHook {
         }
     }
 
+    private static void linkDotAndHost(Object dotObj, Object[] args) {
+        if (dotObj == null) return;
+        sLastActiveDotObj = dotObj;
+
+        int taskId = -1;
+        String appName = null;
+
+        Object taskInfo = null;
+        try {
+            taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
+        } catch (Throwable ignored) {}
+        if (taskInfo == null) {
+            try {
+                taskInfo = XposedHelpers.getObjectField(dotObj, "mTaskInfo");
+            } catch (Throwable ignored) {}
+        }
+        if (taskInfo == null && args != null && args.length > 0) {
+            for (Object arg : args) {
+                if (arg != null && arg.getClass().getName().contains("TaskInfo")) {
+                    taskInfo = arg;
+                    break;
+                }
+            }
+        }
+
+        if (taskInfo != null) {
+            try {
+                taskId = XposedHelpers.getIntField(taskInfo, "taskId");
+            } catch (Throwable ignored) {}
+            try {
+                ComponentName topActivity = (ComponentName) XposedHelpers.getObjectField(taskInfo, "topActivity");
+                if (topActivity != null) {
+                    appName = topActivity.getPackageName();
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        TaskData taskData = new TaskData(taskId, appName, dotObj);
+        sDotToTaskDataMap.put(dotObj, taskData);
+
+        // Associate host with dot controller
+        try {
+            Object host = XposedHelpers.getObjectField(dotObj, "mMiuiDecorationRootViewHost");
+            if (host != null) {
+                sHostToDotMap.put(host, dotObj);
+                try {
+                    View dotView = (View) XposedHelpers.callMethod(host, "getRootView");
+                    if (dotView != null) {
+                        sTaskDataMap.put(dotView, taskData);
+                        dotView.invalidate();
+                    }
+                } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {}
+
+        // Associate touch listener
+        try {
+            Object touchListener = XposedHelpers.getObjectField(dotObj, "mOnCaptionTouchListener");
+            if (touchListener != null) {
+                sTouchListenerToDotMap.put(touchListener, dotObj);
+            }
+        } catch (Throwable ignored) {}
+
+        // Secondary discovery of DotView
+        for (Field f : dotObj.getClass().getDeclaredFields()) {
+            try {
+                f.setAccessible(true);
+                Object v = f.get(dotObj);
+                if (v instanceof View && v.getClass().getName().contains("MiuiDecorationDotView")) {
+                    sTaskDataMap.put((View) v, taskData);
+                    ((View) v).invalidate();
+                    break;
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    private static void applySurfacePositionAndCrop(Object dotObj, Object[] args) {
+        if (dotObj == null || args == null || args.length < 2) return;
+        Context context = null;
+        try {
+            context = (Context) XposedHelpers.getObjectField(dotObj, "mContext");
+        } catch (Throwable ignored) {}
+
+        if (context == null || !ConfigManager.isClassicWindowControlsEnabled(context)) {
+            return;
+        }
+
+        if (args[1] instanceof Rect) {
+            Object t = args[0]; // SurfaceControl.Transaction
+            Rect taskBounds = (Rect) args[1];
+            Object surface = null;
+            try {
+                surface = XposedHelpers.getObjectField(dotObj, "mCaptionContainerSurface");
+            } catch (Throwable ignored) {}
+
+            if (t != null && surface != null && taskBounds != null && taskBounds.width() > 0) {
+                int h = dp(context, 32);
+                XposedHelpers.callMethod(t, "setPosition", surface, 0f, 0f);
+                XposedHelpers.callMethod(t, "setWindowCrop", surface, taskBounds.width(), h);
+            }
+        }
+    }
+
     /**
-     * Hook MiuiDecorationRootViewHost / MiuiDecorationDotViewHost to report full window width and titlebar height
+     * Hook MiuiDecorationDotViewHost to report full window width and titlebar height
      */
     private static void hookMiuiDecorationRootViewHost(XC_LoadPackage.LoadPackageParam lpparam) {
         String[] hostClasses = new String[] {
-                "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationDotViewHost",
-                "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationRootViewHost"
+                "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationDotViewHost"
         };
 
         for (String className : hostClasses) {
@@ -215,11 +252,22 @@ public class WindowCaptionHook {
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         Object host = param.thisObject;
                         Object dotObj = sHostToDotMap.get(host);
+                        if (dotObj == null) dotObj = sLastActiveDotObj;
+
                         if (dotObj != null) {
                             try {
                                 Context context = (Context) XposedHelpers.getObjectField(dotObj, "mContext");
                                 if (ConfigManager.isClassicWindowControlsEnabled(context)) {
                                     Rect bounds = (Rect) XposedHelpers.getObjectField(dotObj, "mTaskBounds");
+                                    if (bounds == null || bounds.width() <= 0) {
+                                        Object taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
+                                        if (taskInfo != null) {
+                                            Configuration cfg = (Configuration) XposedHelpers.getObjectField(taskInfo, "configuration");
+                                            if (cfg != null) {
+                                                bounds = cfg.windowConfiguration.getBounds();
+                                            }
+                                        }
+                                    }
                                     if (bounds != null && bounds.width() > 0) {
                                         param.setResult((float) bounds.width());
                                     }
@@ -235,6 +283,8 @@ public class WindowCaptionHook {
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         Object host = param.thisObject;
                         Object dotObj = sHostToDotMap.get(host);
+                        if (dotObj == null) dotObj = sLastActiveDotObj;
+
                         if (dotObj != null) {
                             try {
                                 Context context = (Context) XposedHelpers.getObjectField(dotObj, "mContext");
@@ -385,7 +435,7 @@ public class WindowCaptionHook {
                         if (event.getAction() == MotionEvent.ACTION_UP) {
                             TaskData data = sTaskDataMap.get(view);
                             int taskId = (data != null) ? data.taskId : -1;
-                            Object dotObj = (data != null) ? data.dotInstance : null;
+                            Object dotObj = (data != null) ? data.dotInstance : sLastActiveDotObj;
 
                             if (x >= w - dp(context, 46)) {
                                 performClose(context, taskId, dotObj);
@@ -448,12 +498,15 @@ public class WindowCaptionHook {
                                 if (data != null) taskId = data.taskId;
                             }
 
+                            Object dotObj = sTouchListenerToDotMap.get(param.thisObject);
+                            if (dotObj == null) dotObj = sLastActiveDotObj;
+
                             if (x >= w - dp(context, 46)) {
-                                performClose(context, taskId, null);
+                                performClose(context, taskId, dotObj);
                             } else if (x >= w - dp(context, 82)) {
-                                performMaximize(context, taskId, null);
+                                performMaximize(context, taskId, dotObj);
                             } else {
-                                performMinimize(context, taskId, null);
+                                performMinimize(context, taskId, dotObj);
                             }
                         }
                         param.setResult(true); // Consume touch so dragging isn't triggered
@@ -494,21 +547,63 @@ public class WindowCaptionHook {
     }
 
     public static void performMinimize(Context context, int taskId, Object dotInstance) {
+        if (dotInstance != null) {
+            try {
+                Object taskInfo = XposedHelpers.getObjectField(dotInstance, "mRunningTaskInfo");
+                Object taskOrg = XposedHelpers.getObjectField(dotInstance, "mTaskOrganizer");
+                if (taskInfo != null && taskOrg != null) {
+                    Object token = XposedHelpers.getObjectField(taskInfo, "token");
+                    Class<?> wctCls = Class.forName("android.window.WindowContainerTransaction");
+                    Object wct = wctCls.newInstance();
+                    XposedHelpers.callMethod(wct, "reorder", token, false);
+                    XposedHelpers.callMethod(taskOrg, "applyTransaction", wct);
+                    return;
+                }
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "performMinimize via WCT failed: " + t);
+            }
+        }
+
+        // Secondary fallback via ATM moveTaskToRootTask or moveTaskToBack
         try {
             if (taskId > 0) {
                 Class<?> atmCls = Class.forName("android.app.ActivityTaskManager");
                 Method getService = atmCls.getMethod("getService");
                 Object atm = getService.invoke(null);
-                Method moveTaskToBack = atm.getClass().getMethod("moveTaskToBack", int.class);
-                moveTaskToBack.invoke(atm, taskId);
-                return;
+                try {
+                    Method moveTaskToRootTask = atm.getClass().getMethod("moveTaskToRootTask", int.class, int.class, boolean.class);
+                    moveTaskToRootTask.invoke(atm, taskId, -1, false);
+                    return;
+                } catch (Throwable ignored) {}
             }
         } catch (Throwable t) {
-            XposedBridge.log(TAG + "moveTaskToBack via ATM failed: " + t);
+            XposedBridge.log(TAG + "performMinimize via ATM failed: " + t);
         }
     }
 
     public static void performMaximize(Context context, int taskId, Object dotInstance) {
+        if (dotInstance != null) {
+            try {
+                Object taskInfo = XposedHelpers.getObjectField(dotInstance, "mRunningTaskInfo");
+                Object taskOrg = XposedHelpers.getObjectField(dotInstance, "mTaskOrganizer");
+                if (taskInfo != null && taskOrg != null) {
+                    Object token = XposedHelpers.getObjectField(taskInfo, "token");
+                    Class<?> wctCls = Class.forName("android.window.WindowContainerTransaction");
+                    Object wct = wctCls.newInstance();
+                    int currentMode = 5;
+                    try {
+                        currentMode = XposedHelpers.getIntField(dotInstance, "mWindowingMode");
+                    } catch (Throwable ignored) {}
+                    int targetMode = (currentMode == 1) ? 5 : 1;
+                    XposedHelpers.callMethod(wct, "setWindowingMode", token, targetMode);
+                    XposedHelpers.callMethod(taskOrg, "applyTransaction", wct);
+                    return;
+                }
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "performMaximize via WCT failed: " + t);
+            }
+        }
+
         try {
             if (taskId > 0) {
                 Class<?> atmCls = Class.forName("android.app.ActivityTaskManager");
