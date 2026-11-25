@@ -32,8 +32,8 @@ public class DeXTaskbarView extends FrameLayout {
 
     private void init(Context context) {
         setId(R.id.dex_taskbar_view);
-        setClipChildren(false);
-        setClipToPadding(false);
+        setClipChildren(true);
+        setClipToPadding(true);
 
         int barHeightDp = ConfigManager.getTaskbarHeight(context);
         int barHeightPx = dp(context, barHeightDp);
@@ -185,11 +185,13 @@ public class DeXTaskbarView extends FrameLayout {
         if (navButtonsView != null && navButtonsView.getVisibility() != GONE) {
             int navLeft = dp(getContext(), 4);
             navButtonsView.layout(navLeft, 0, navLeft + navW, height);
+            navButtonsView.bringToFront();
         }
 
         if (systemTrayView != null && systemTrayView.getVisibility() != GONE) {
             int trayRight = width - dp(getContext(), 4);
             systemTrayView.layout(trayRight - trayW, 0, trayRight, height);
+            systemTrayView.bringToFront();
         }
 
         if (dockAppsView != null && dockAppsView.getVisibility() != GONE) {

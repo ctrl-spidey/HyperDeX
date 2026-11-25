@@ -194,6 +194,11 @@ public class DeXNavButtonsView extends LinearLayout {
                 }
             } catch (Throwable ignored) {}
             try {
+                Method showSearchDialog = launcher.getClass().getMethod("showHomeSearchBarDialog");
+                showSearchDialog.invoke(launcher);
+                return;
+            } catch (Throwable ignored) {}
+            try {
                 Method showMethod = launcher.getClass().getMethod("showOrHideAllAppsWindow");
                 showMethod.invoke(launcher);
                 return;

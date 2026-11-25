@@ -229,7 +229,13 @@ public class LauncherDockHook {
             XposedBridge.hookAllMethods(devConfigCls, "getHotSeatsPaddingLeft", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    param.setResult(0);
+                    Context context = null;
+                    if (sCurrentHotSeatsInstance instanceof View) {
+                        context = ((View) sCurrentHotSeatsInstance).getContext();
+                    }
+                    if (context != null && ConfigManager.shouldApplyDeXTaskbar(context)) {
+                        param.setResult(0);
+                    }
                 }
             });
             XposedBridge.log(TAG + "DeviceConfig hooked");
@@ -310,8 +316,7 @@ public class LauncherDockHook {
 
     private static void hookDockContainerViews(XC_LoadPackage.LoadPackageParam lpparam) {
         String[] containerClasses = new String[] {
-            "com.miui.home.launcher.laptop.dockbar.DockContainerView",
-            "com.miui.home.launcher.dock.DockContainerView"
+            "com.miui.home.launcher.laptop.dockbar.DockContainerView"
         };
 
         for (String className : containerClasses) {
@@ -918,6 +923,17 @@ public class LauncherDockHook {
         try {
             boolean isLaptopOverlay = dockContainer.getClass().getName().contains("laptop.dockbar.DockContainerView");
 
+            if (!ConfigManager.shouldApplyDeXTaskbar(context)) {
+                View existingTaskbar = dockContainer.findViewById(R.id.dex_taskbar_view);
+                if (existingTaskbar != null) {
+                    dockContainer.removeView(existingTaskbar);
+                }
+                if (isLaptopOverlay) {
+                    dockContainer.setVisibility(View.GONE);
+                }
+                return;
+            }
+
             if (!isLaptopOverlay) {
                 View existingTaskbar = dockContainer.findViewById(R.id.dex_taskbar_view);
                 if (existingTaskbar != null) {
@@ -925,6 +941,8 @@ public class LauncherDockHook {
                 }
                 return;
             }
+
+            dockContainer.setVisibility(View.VISIBLE);
 
             int barHeightDp = ConfigManager.getTaskbarHeight(context);
             int barHeightPx = dp(context, barHeightDp);
@@ -1011,12 +1029,16 @@ public class LauncherDockHook {
                     dockContainer.removeView(existingTaskbar);
                 }
 
-                // Restore stock children
-                for (int i = 0; i < dockContainer.getChildCount(); i++) {
-                    View child = dockContainer.getChildAt(i);
-                    if (child != null) {
-                        child.setVisibility(View.VISIBLE);
-                        child.setAlpha(1.0f);
+                if (dockContainer.getClass().getName().contains("laptop.dockbar.DockContainerView")) {
+                    dockContainer.setVisibility(View.GONE);
+                } else {
+                    // Restore stock children
+                    for (int i = 0; i < dockContainer.getChildCount(); i++) {
+                        View child = dockContainer.getChildAt(i);
+                        if (child != null) {
+                            child.setVisibility(View.VISIBLE);
+                            child.setAlpha(1.0f);
+                        }
                     }
                 }
             }

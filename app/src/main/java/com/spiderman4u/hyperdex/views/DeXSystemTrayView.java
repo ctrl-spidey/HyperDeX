@@ -180,6 +180,12 @@ public class DeXSystemTrayView extends LinearLayout {
         updateClock();
     }
 
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        updateResponsiveLayout();
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+    }
+
     public void updateResponsiveLayout() {
         boolean isPortrait = getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_PORTRAIT;
         if (ivScreenshot != null) {

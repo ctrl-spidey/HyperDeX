@@ -90,12 +90,12 @@ public class WindowCaptionHook {
 
         float scale = getWindowScale(view, dotObj);
         float visibleWidth;
-        if (winWidth > 0 && winWidth < barLength) {
-            visibleWidth = (float) winWidth;
+        if (winWidth > 0) {
+            visibleWidth = (float) Math.min(winWidth, barLength);
         } else if (scale > 0.1f && scale < 0.99f) {
             visibleWidth = barLength * scale;
         } else {
-            visibleWidth = barLength * 0.6525f;
+            visibleWidth = (float) barLength;
         }
 
         if (visibleWidth > barLength) {
@@ -206,6 +206,34 @@ public class WindowCaptionHook {
                         applySurfacePositionAndCrop(param.thisObject, param.args);
                     }
                 });
+
+                // 5. Suppress scale animation during window drag to keep titlebar buttons persistent
+                try {
+                    Class<?> scaleAnimCls = XposedHelpers.findClassIfExists(
+                            "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationDotScaleAnim",
+                            lpparam.classLoader
+                    );
+                    if (scaleAnimCls != null) {
+                        XposedBridge.hookAllMethods(scaleAnimCls, "startMenuAnimation", new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                Context context = null;
+                                try {
+                                    Object dot = XposedHelpers.getObjectField(param.thisObject, "mDecorationDot");
+                                    if (dot != null) {
+                                        context = (Context) XposedHelpers.getObjectField(dot, "mContext");
+                                    }
+                                } catch (Throwable ignored) {}
+                                if (ConfigManager.isClassicWindowControlsEnabled(context)) {
+                                    param.setResult(null); // Keep caption surface full-sized during window drag!
+                                }
+                            }
+                        });
+                        XposedBridge.log(TAG + "MiuiDecorationDotScaleAnim hooked successfully");
+                    }
+                } catch (Throwable tAnim) {
+                    XposedBridge.log(TAG + "Failed hooking MiuiDecorationDotScaleAnim: " + tAnim);
+                }
 
                 XposedBridge.log(TAG + "MiuiDecorationDot hooked successfully");
             }
@@ -733,7 +761,7 @@ public class WindowCaptionHook {
             try {
                 WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
                 if (wm != null) {
-                    android.view.WindowMetrics metrics = wm.getMaximumWindowMetrics();
+                    android.view.WindowMetrics metrics = wm.getCurrentWindowMetrics();
                     if (metrics != null && metrics.getBounds() != null) {
                         return new Rect(metrics.getBounds());
                     }
@@ -975,6 +1003,9 @@ public class WindowCaptionHook {
                                 v.setAlpha(0f);
                                 XposedHelpers.callMethod(param.thisObject, "setMeasuredDimension", 0, 0);
                                 param.setResult(null);
+                            } else {
+                                v.setVisibility(View.VISIBLE);
+                                v.setAlpha(1.0f);
                             }
                         }
                     }

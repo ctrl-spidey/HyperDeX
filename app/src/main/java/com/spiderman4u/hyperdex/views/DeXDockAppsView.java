@@ -51,12 +51,16 @@ public class DeXDockAppsView extends HorizontalScrollView {
 
     private void init(Context context) {
         setHorizontalScrollBarEnabled(false);
-        setOverScrollMode(OVER_SCROLL_NEVER);
-        setFillViewport(true);
+        setOverScrollMode(OVER_SCROLL_IF_CONTENT_SCROLLS);
+        setFillViewport(false);
+        setClipChildren(true);
+        setClipToPadding(true);
 
         appsContainer = new LinearLayout(context);
         appsContainer.setOrientation(LinearLayout.HORIZONTAL);
         appsContainer.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+        appsContainer.setClipChildren(true);
+        appsContainer.setClipToPadding(true);
         addView(appsContainer, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         reloadApps(context);
