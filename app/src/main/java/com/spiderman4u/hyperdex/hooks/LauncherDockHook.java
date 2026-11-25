@@ -73,7 +73,9 @@ public class LauncherDockHook {
                         View hotSeatsView = (View) param.thisObject;
                         Context context = hotSeatsView.getContext();
                         registerObserver(context);
-                        applyDockLayout(param.thisObject, context);
+                        if (ConfigManager.shouldApplyDeXTaskbar(context)) {
+                            applyDockLayout(param.thisObject, context);
+                        }
                     }
                 }
             });
@@ -96,7 +98,10 @@ public class LauncherDockHook {
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.thisObject instanceof View) {
                         View v = (View) param.thisObject;
-                        applyDockLayout(param.thisObject, v.getContext());
+                        Context context = v.getContext();
+                        if (ConfigManager.shouldApplyDeXTaskbar(context)) {
+                            applyDockLayout(param.thisObject, context);
+                        }
                     }
                 }
             });
@@ -107,7 +112,10 @@ public class LauncherDockHook {
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.thisObject instanceof View) {
                         View v = (View) param.thisObject;
-                        applyDockLayout(param.thisObject, v.getContext());
+                        Context context = v.getContext();
+                        if (ConfigManager.shouldApplyDeXTaskbar(context)) {
+                            applyDockLayout(param.thisObject, context);
+                        }
                     }
                 }
             });
@@ -1016,13 +1024,14 @@ public class LauncherDockHook {
         try {
             if (!(hotSeatsObj instanceof View)) return;
             View hotSeatsView = (View) hotSeatsObj;
-            hotSeatsView.setVisibility(View.VISIBLE);
-            hotSeatsView.setAlpha(1.0f);
+            if (hotSeatsView.getVisibility() == View.GONE) {
+                hotSeatsView.setVisibility(View.VISIBLE);
+                hotSeatsView.setAlpha(1.0f);
+            }
 
             ViewParent parent = hotSeatsView.getParent();
             if (parent instanceof ViewGroup) {
                 ViewGroup dockContainer = (ViewGroup) parent;
-                dockContainer.setBackground(null);
 
                 View existingTaskbar = dockContainer.findViewById(R.id.dex_taskbar_view);
                 if (existingTaskbar != null) {
@@ -1035,72 +1044,15 @@ public class LauncherDockHook {
                     // Restore stock children
                     for (int i = 0; i < dockContainer.getChildCount(); i++) {
                         View child = dockContainer.getChildAt(i);
-                        if (child != null) {
+                        if (child != null && child.getVisibility() != View.VISIBLE) {
                             child.setVisibility(View.VISIBLE);
                             child.setAlpha(1.0f);
                         }
                     }
                 }
             }
-
-            ViewGroup.LayoutParams lp = hotSeatsView.getLayoutParams();
-            if (lp instanceof FrameLayout.LayoutParams) {
-                FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) lp;
-                flp.gravity = Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM;
-                flp.leftMargin = 0;
-                flp.rightMargin = 0;
-                hotSeatsView.setLayoutParams(flp);
-            }
-            hotSeatsView.setTranslationX(0f);
-
-            showBackgroundField(hotSeatsObj, "mBlurBackground");
-            showBackgroundField(hotSeatsObj, "mBlurBackground2");
-            showBackgroundField(hotSeatsObj, "mNormalBackground");
-            showBackgroundField(hotSeatsObj, "mMiuiXBlurBackground");
-
-            Object listContent = XposedHelpers.getObjectField(hotSeatsObj, "mListContent");
-            if (listContent != null) {
-                showBackgroundField(listContent, "mContentBackground");
-                if (listContent instanceof View) {
-                    View listContentView = (View) listContent;
-                    ViewGroup.LayoutParams listLp = listContentView.getLayoutParams();
-                    if (listLp instanceof FrameLayout.LayoutParams) {
-                        FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) listLp;
-                        flp.gravity = Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM;
-                        flp.leftMargin = 0;
-                        listContentView.setLayoutParams(flp);
-                    }
-                }
-            }
-
-            hotSeatsView.setBackground(null);
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Error in restoreWorkstationStyle: " + t.getMessage());
-        }
-    }
-
-    private static void hideBackgroundField(Object target, String fieldName) {
-        try {
-            Object val = XposedHelpers.getObjectField(target, fieldName);
-            if (val instanceof View) {
-                View v = (View) val;
-                v.setVisibility(View.GONE);
-                v.setAlpha(0f);
-                v.setBackground(null);
-            }
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private static void showBackgroundField(Object target, String fieldName) {
-        try {
-            Object val = XposedHelpers.getObjectField(target, fieldName);
-            if (val instanceof View) {
-                View v = (View) val;
-                v.setVisibility(View.VISIBLE);
-                v.setAlpha(1.0f);
-            }
-        } catch (Throwable ignored) {
         }
     }
 

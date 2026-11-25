@@ -34,11 +34,11 @@ public class ConfigManager {
     }
 
     public static boolean isDeXButtonsEnabled(Context context) {
-        return getGlobalBoolean(context, SETTING_DEX_BUTTONS, true);
+        return getGlobalBoolean(context, SETTING_DEX_BUTTONS, false);
     }
 
     public static boolean isClassicWindowControlsEnabled(Context context) {
-        return isDeXButtonsEnabled(context) && shouldApplyDeXTaskbar(context);
+        return false;
     }
 
     public static boolean isApplyInNormalModeEnabled(Context context) {
@@ -118,6 +118,7 @@ public class ConfigManager {
         setBoolean(context, Constants.PREF_SHOW_NAV_BUTTONS, true);
         setBoolean(context, Constants.PREF_SHOW_SEARCH_BUTTON, true);
         setBoolean(context, Constants.PREF_FLOATING_POPUPS, true);
+        setBoolean(context, Constants.PREF_DEX_BUTTONS, false);
         notifyChanged(context);
     }
 

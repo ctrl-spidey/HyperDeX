@@ -911,7 +911,7 @@ public class WindowCaptionHook {
                     View captionView = (View) param.thisObject;
                     Context context = captionView.getContext();
 
-                    if (!ConfigManager.shouldApplyDeXTaskbar(context)) {
+                    if (!ConfigManager.isClassicWindowControlsEnabled(context)) {
                         return;
                     }
 
@@ -1138,7 +1138,7 @@ public class WindowCaptionHook {
                     View captionView = getField(holder, "captionView", View.class);
                     Context context = captionView != null ? captionView.getContext() : null;
 
-                    if (!ConfigManager.shouldApplyDeXTaskbar(context)) {
+                    if (!ConfigManager.isClassicWindowControlsEnabled(context)) {
                         return;
                     }
 
