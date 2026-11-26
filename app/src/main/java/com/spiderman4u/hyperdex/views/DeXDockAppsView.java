@@ -82,21 +82,8 @@ public class DeXDockAppsView extends HorizontalScrollView {
         iconSizePx = Math.min(iconSizePx, maxSafeIconPx);
         int spacingPx = dp(context, ConfigManager.getIconSpacing(context));
 
-        // 1. Get running processes for active indicator
-        Set<String> runningPkgs = new HashSet<>();
-        try {
-            ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-            if (am != null) {
-                List<ActivityManager.RunningAppProcessInfo> procs = am.getRunningAppProcesses();
-                if (procs != null) {
-                    for (ActivityManager.RunningAppProcessInfo p : procs) {
-                        if (p.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE) {
-                            runningPkgs.add(p.processName);
-                        }
-                    }
-                }
-            }
-        } catch (Throwable ignored) {}
+        // 1. Get actually running tasks (active activity windows, not background services/daemons)
+        Set<String> runningPkgs = getActuallyRunningPackages(context);
 
         // 2. Collect pinned apps from HotSeats
         List<String> appPackages = new ArrayList<>();
@@ -271,6 +258,80 @@ public class DeXDockAppsView extends HorizontalScrollView {
         } catch (Throwable ignored) {}
 
         return null;
+    }
+
+    private Set<String> getActuallyRunningPackages(Context context) {
+        Set<String> running = new HashSet<>();
+        try {
+            Class<?> atmCls = Class.forName("android.app.ActivityTaskManager");
+            Method getService = atmCls.getDeclaredMethod("getService");
+            Object atm = getService.invoke(null);
+            Method getTasks = atm.getClass().getDeclaredMethod("getTasks", int.class, boolean.class, boolean.class, int.class);
+            List<?> tasks = (List<?>) getTasks.invoke(atm, 50, false, false, 0);
+            if (tasks != null) {
+                for (Object task : tasks) {
+                    try {
+                        ComponentName comp = (ComponentName) XposedHelpers.getObjectField(task, "realActivity");
+                        if (comp == null) {
+                            comp = (ComponentName) XposedHelpers.getObjectField(task, "baseActivity");
+                        }
+                        if (comp != null) {
+                            String pkg = comp.getPackageName();
+                            if (!pkg.equals("com.miui.home") && !pkg.contains("systemui") && !pkg.equals("android")) {
+                                running.add(pkg);
+                            }
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            }
+        } catch (Throwable t) {
+            try {
+                ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+                if (am != null) {
+                    List<ActivityManager.RunningTaskInfo> list = am.getRunningTasks(50);
+                    if (list != null) {
+                        for (ActivityManager.RunningTaskInfo info : list) {
+                            try {
+                                ComponentName comp = (ComponentName) XposedHelpers.getObjectField(info, "realActivity");
+                                if (comp == null) {
+                                    comp = (ComponentName) XposedHelpers.getObjectField(info, "baseActivity");
+                                }
+                                if (comp != null) {
+                                    String pkg = comp.getPackageName();
+                                    if (!pkg.equals("com.miui.home") && !pkg.contains("systemui") && !pkg.equals("android")) {
+                                        running.add(pkg);
+                                    }
+                                }
+                            } catch (Throwable ignored2) {}
+                        }
+                    }
+                }
+            } catch (Throwable ignored3) {}
+        }
+        return running;
+    }
+
+    private final Runnable mRunningAppsRefreshRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isAttachedToWindow() && getVisibility() == View.VISIBLE) {
+                reloadApps(getContext());
+            }
+            mHandler.postDelayed(this, 3000);
+        }
+    };
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        mHandler.removeCallbacks(mRunningAppsRefreshRunnable);
+        mHandler.postDelayed(mRunningAppsRefreshRunnable, 2000);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        mHandler.removeCallbacks(mRunningAppsRefreshRunnable);
     }
 
     private int dp(Context context, float val) {

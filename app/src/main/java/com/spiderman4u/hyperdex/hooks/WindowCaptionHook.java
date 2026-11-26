@@ -1139,6 +1139,12 @@ public class WindowCaptionHook {
                     Context context = captionView != null ? captionView.getContext() : null;
 
                     if (!ConfigManager.isClassicWindowControlsEnabled(context)) {
+                        ImageButton minBtn = getField(holder, "minimizeWindowButton", ImageButton.class);
+                        if (minBtn != null) minBtn.setVisibility(View.GONE);
+                        ImageButton maxBtn = getField(holder, "maximizeWindowButton", ImageButton.class);
+                        if (maxBtn != null) maxBtn.setVisibility(View.GONE);
+                        ImageButton closeBtn = getField(holder, "closeWindowButton", ImageButton.class);
+                        if (closeBtn != null) closeBtn.setVisibility(View.GONE);
                         return;
                     }
 
