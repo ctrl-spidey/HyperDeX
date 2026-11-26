@@ -89,7 +89,9 @@ public class DeXSystemTrayView extends LinearLayout {
         ivScreenshot = new ImageView(context);
         ivScreenshot.setPadding(dp(4), dp(4), dp(4), dp(4));
         ivScreenshot.setImageDrawable(DeXVectorDrawables.createScreenshotDrawable(iconColor));
-        ivScreenshot.setOnClickListener(v -> triggerScreenshot(context));
+        ivScreenshot.setOnClickListener(v -> {
+            DeXNavButtonsView.sendNavAction(context, "screenshot");
+        });
         addView(ivScreenshot, new LayoutParams(btnSize, btnSize));
 
         // 2. Volume Speaker Icon
@@ -103,6 +105,7 @@ public class DeXSystemTrayView extends LinearLayout {
 
         // 3. Notification Bell Button
         ivNotification = new ImageView(context);
+        ivNotification.setId(com.spiderman4u.hyperdex.R.id.dex_tray_notification);
         ivNotification.setPadding(dp(4), dp(4), dp(4), dp(4));
         ivNotification.setImageDrawable(DeXVectorDrawables.createBellDrawable(iconColor));
         ivNotification.setOnClickListener(v -> onNotificationClicked(context, v));
@@ -213,6 +216,28 @@ public class DeXSystemTrayView extends LinearLayout {
         if (tvDate != null) {
             tvDate.setText(dateFormat.format(now));
         }
+    }
+
+    public View getNotificationIcon() {
+        return ivNotification;
+    }
+
+    public void pulseNotificationBell() {
+        if (ivNotification == null) return;
+        ivNotification.animate()
+                .scaleX(1.3f)
+                .scaleY(1.3f)
+                .setDuration(160)
+                .withEndAction(() -> {
+                    if (ivNotification != null) {
+                        ivNotification.animate()
+                                .scaleX(1.0f)
+                                .scaleY(1.0f)
+                                .setDuration(200)
+                                .start();
+                    }
+                })
+                .start();
     }
 
     private void onNotificationClicked(Context context, View v) {

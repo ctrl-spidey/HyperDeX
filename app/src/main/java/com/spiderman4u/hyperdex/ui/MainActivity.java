@@ -17,15 +17,11 @@ public class MainActivity extends AppCompatActivity {
 
     private TextView tvModeTitle;
     private TextView tvModeDesc;
-    private TextView tvWorkstationStatus;
     private MaterialSwitch switchMainMode;
-    private MaterialSwitch switchEdgeToEdge;
     private MaterialSwitch switchStartMenu;
     private MaterialSwitch switchNavButtons;
     private MaterialSwitch switchSearchButton;
     private MaterialSwitch switchFloatingPopups;
-    private MaterialSwitch switchApplyNormal;
-    private MaterialSwitch switchDexButtons;
 
     private TextView tvTaskbarHeightVal;
     private SeekBar seekTaskbarHeight;
@@ -40,10 +36,10 @@ public class MainActivity extends AppCompatActivity {
     private MaterialButton btnRestart;
 
     private static final int MIN_TASKBAR_HEIGHT = 36;
-    private static final int MAX_TASKBAR_HEIGHT = 64;
+    private static final int MAX_TASKBAR_HEIGHT = 60;
     private static final int MIN_ICON_SIZE = 24;
-    private static final int MAX_ICON_SIZE = 48;
-    private static final int MIN_ICON_SPACING = 0;
+    private static final int MAX_ICON_SIZE = 44;
+    private static final int MIN_ICON_SPACING = 2;
     private static final int MAX_ICON_SPACING = 16;
     private static final int MIN_OPACITY = 40;
     private static final int MAX_OPACITY = 100;
@@ -55,16 +51,12 @@ public class MainActivity extends AppCompatActivity {
 
         tvModeTitle = findViewById(R.id.tv_mode_title);
         tvModeDesc = findViewById(R.id.tv_mode_desc);
-        tvWorkstationStatus = findViewById(R.id.tv_workstation_status);
 
         switchMainMode = findViewById(R.id.switch_main_mode);
-        switchEdgeToEdge = findViewById(R.id.switch_edge_to_edge);
         switchStartMenu = findViewById(R.id.switch_start_menu);
         switchNavButtons = findViewById(R.id.switch_nav_buttons);
         switchSearchButton = findViewById(R.id.switch_search_button);
         switchFloatingPopups = findViewById(R.id.switch_floating_popups);
-        switchApplyNormal = findViewById(R.id.switch_apply_normal);
-        switchDexButtons = findViewById(R.id.switch_dex_buttons);
 
         tvTaskbarHeightVal = findViewById(R.id.tv_taskbar_height_val);
         seekTaskbarHeight = findViewById(R.id.seek_taskbar_height);
@@ -78,7 +70,6 @@ public class MainActivity extends AppCompatActivity {
 
         btnRestart = findViewById(R.id.btn_restart);
 
-        // Configure seek bar ranges
         seekTaskbarHeight.setMax(MAX_TASKBAR_HEIGHT - MIN_TASKBAR_HEIGHT);
         seekIconSize.setMax(MAX_ICON_SIZE - MIN_ICON_SIZE);
         seekIconSpacing.setMax(MAX_ICON_SPACING - MIN_ICON_SPACING);
@@ -88,33 +79,15 @@ public class MainActivity extends AppCompatActivity {
         setupListeners();
     }
 
-    @Override
-    protected void onResume() {
-        super.onResume();
-        updateWorkstationStatus();
-        ensureNotificationListenerEnabled();
-    }
-
-    private void ensureNotificationListenerEnabled() {
-        new Thread(() -> {
-            try {
-                Runtime.getRuntime().exec(new String[]{"su", "-c", "cmd notification allow_listener com.spiderman4u.hyperdex/com.spiderman4u.hyperdex.services.DeXNotificationListener"});
-            } catch (Throwable ignored) {}
-        }).start();
-    }
-
     private void loadPreferences() {
         boolean isDeX = ConfigManager.isDeXModeEnabled(this);
         switchMainMode.setChecked(isDeX);
         updateModeText(isDeX);
 
-        switchEdgeToEdge.setChecked(ConfigManager.isEdgeToEdgeEnabled(this));
         switchStartMenu.setChecked(ConfigManager.isStartMenuEnabled(this));
         switchNavButtons.setChecked(ConfigManager.isShowNavButtons(this));
         switchSearchButton.setChecked(ConfigManager.isShowSearchButton(this));
         switchFloatingPopups.setChecked(ConfigManager.isFloatingPopupsEnabled(this));
-        switchApplyNormal.setChecked(ConfigManager.isApplyInNormalModeEnabled(this));
-        switchDexButtons.setChecked(ConfigManager.isDeXButtonsEnabled(this));
 
         // Load Sliders
         int height = ConfigManager.getTaskbarHeight(this);
@@ -134,7 +107,6 @@ public class MainActivity extends AppCompatActivity {
         tvTaskbarOpacityVal.setText(opacity + "%");
 
         updateSubSwitchesEnabled(isDeX);
-        updateWorkstationStatus();
     }
 
     private void setupListeners() {
@@ -142,10 +114,7 @@ public class MainActivity extends AppCompatActivity {
             ConfigManager.setDeXModeEnabled(this, isChecked);
             updateModeText(isChecked);
             updateSubSwitchesEnabled(isChecked);
-        });
-
-        switchEdgeToEdge.setOnCheckedChangeListener((btn, isChecked) -> {
-            ConfigManager.setBoolean(this, Constants.PREF_EDGE_TO_EDGE, isChecked);
+            Toast.makeText(this, "DeX Mode " + (isChecked ? "Enabled" : "Disabled") + " • @spideyHyperOS", Toast.LENGTH_SHORT).show();
         });
 
         switchStartMenu.setOnCheckedChangeListener((btn, isChecked) -> {
@@ -164,14 +133,6 @@ public class MainActivity extends AppCompatActivity {
             ConfigManager.setBoolean(this, Constants.PREF_FLOATING_POPUPS, isChecked);
         });
 
-        switchApplyNormal.setOnCheckedChangeListener((btn, isChecked) -> {
-            ConfigManager.setBoolean(this, Constants.PREF_APPLY_NORMAL, isChecked);
-        });
-
-        switchDexButtons.setOnCheckedChangeListener((btn, isChecked) -> {
-            ConfigManager.setBoolean(this, Constants.PREF_DEX_BUTTONS, isChecked);
-        });
-
         // Sliders Listeners
         seekTaskbarHeight.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
@@ -181,7 +142,6 @@ public class MainActivity extends AppCompatActivity {
                 if (fromUser) {
                     ConfigManager.setInt(MainActivity.this, Constants.PREF_TASKBAR_HEIGHT, val);
                 }
-                // Constrain max icon size so icons never overflow the taskbar
                 int maxAllowedIcon = Math.max(MIN_ICON_SIZE, val - 8);
                 seekIconSize.setMax(Math.max(1, maxAllowedIcon - MIN_ICON_SIZE));
                 int currentIcon = ConfigManager.getIconSize(MainActivity.this);
@@ -247,50 +207,36 @@ public class MainActivity extends AppCompatActivity {
 
     private void updateModeText(boolean isDeX) {
         if (isDeX) {
-            tvModeTitle.setText("Samsung Classic DeX");
-            tvModeTitle.setTextColor(getColor(R.color.secondary));
+            tvModeTitle.setText(R.string.title_active_mode);
             tvModeDesc.setText(R.string.desc_mode_dex);
         } else {
-            tvModeTitle.setText("Stock Workstation Mode");
-            tvModeTitle.setTextColor(getColor(R.color.text_primary));
+            tvModeTitle.setText("HyperOS Standard Mode");
             tvModeDesc.setText(R.string.desc_mode_workstation);
         }
     }
 
-    private void updateSubSwitchesEnabled(boolean isDeX) {
-        switchEdgeToEdge.setEnabled(isDeX);
-        switchStartMenu.setEnabled(isDeX);
-        switchNavButtons.setEnabled(isDeX);
-        switchSearchButton.setEnabled(isDeX);
-        switchFloatingPopups.setEnabled(isDeX);
-        switchApplyNormal.setEnabled(isDeX);
-        switchDexButtons.setEnabled(isDeX);
-        seekTaskbarHeight.setEnabled(isDeX);
-        seekIconSize.setEnabled(isDeX);
-        seekIconSpacing.setEnabled(isDeX);
-        seekTaskbarOpacity.setEnabled(isDeX);
-        btnResetDefaults.setEnabled(isDeX);
-    }
-
-    private void updateWorkstationStatus() {
-        boolean isWorkstation = ConfigManager.isWorkstationMode(this);
-        if (isWorkstation) {
-            tvWorkstationStatus.setText(R.string.status_workstation_active);
-            tvWorkstationStatus.setTextColor(getColor(R.color.secondary));
-        } else {
-            tvWorkstationStatus.setText(R.string.status_workstation_inactive);
-            tvWorkstationStatus.setTextColor(getColor(R.color.text_secondary));
-        }
+    private void updateSubSwitchesEnabled(boolean enabled) {
+        switchStartMenu.setEnabled(enabled);
+        switchNavButtons.setEnabled(enabled);
+        switchSearchButton.setEnabled(enabled);
+        switchFloatingPopups.setEnabled(enabled);
+        seekTaskbarHeight.setEnabled(enabled);
+        seekIconSize.setEnabled(enabled);
+        seekIconSpacing.setEnabled(enabled);
+        seekTaskbarOpacity.setEnabled(enabled);
+        btnResetDefaults.setEnabled(enabled);
     }
 
     private void restartLauncher() {
-        try {
-            Process process = Runtime.getRuntime().exec(new String[]{"su", "-c", "pkill -f com.miui.home && pkill -f com.android.systemui"});
-            process.waitFor();
-            Toast.makeText(this, R.string.toast_restarted, Toast.LENGTH_SHORT).show();
-            updateWorkstationStatus();
-        } catch (Exception e) {
-            Toast.makeText(this, "Could not restart: " + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
+        Toast.makeText(this, R.string.toast_restarted, Toast.LENGTH_LONG).show();
+
+        new Thread(() -> {
+            try {
+                Runtime.getRuntime().exec(new String[]{"su", "-c", "pkill -f com.miui.home"});
+            } catch (Throwable ignored) {}
+            try {
+                Runtime.getRuntime().exec(new String[]{"su", "-c", "pkill -f com.android.systemui"});
+            } catch (Throwable ignored) {}
+        }).start();
     }
 }

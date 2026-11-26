@@ -8,9 +8,8 @@ import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
-import android.os.Handler;
-import android.os.Looper;
 import android.provider.Settings;
+import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -22,26 +21,45 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import com.spiderman4u.hyperdex.config.ConfigManager;
-import com.spiderman4u.hyperdex.services.DeXNotificationListener;
+import com.spiderman4u.hyperdex.config.Constants;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-import java.io.File;
-import java.io.FileInputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class DeXNotificationPopup {
 
     private static PopupWindow sCurrentPopup = null;
+    private static final List<SimpleNotificationItem> sRecentNotifications = Collections.synchronizedList(new ArrayList<>());
 
     public static class SimpleNotificationItem {
         public String packageName;
         public String title;
         public String text;
         public String time;
+    }
+
+    public static void addNotification(String pkg, String title, String text, String time) {
+        if (TextUtils.isEmpty(pkg)) return;
+        SimpleNotificationItem item = new SimpleNotificationItem();
+        item.packageName = pkg;
+        item.title = title != null ? title : "";
+        item.text = text != null ? text : "";
+        item.time = time != null ? time : "now";
+
+        synchronized (sRecentNotifications) {
+            // Remove duplicate if same package and title
+            for (int i = sRecentNotifications.size() - 1; i >= 0; i--) {
+                SimpleNotificationItem existing = sRecentNotifications.get(i);
+                if (pkg.equals(existing.packageName) && item.title.equals(existing.title)) {
+                    sRecentNotifications.remove(i);
+                }
+            }
+            sRecentNotifications.add(0, item);
+            if (sRecentNotifications.size() > 20) {
+                sRecentNotifications.remove(sRecentNotifications.size() - 1);
+            }
+        }
     }
 
     public static void show(Context context, View anchorView) {
@@ -64,7 +82,7 @@ public class DeXNotificationPopup {
         bg.setStroke(dp(context, 1), Color.parseColor("#33FFFFFF"));
         root.setBackground(bg);
 
-        // 1. Header (Notifications title, Notification settings, Clear button)
+        // 1. Header (Notifications title, Settings, Clear button)
         LinearLayout header = new LinearLayout(context);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
@@ -92,7 +110,7 @@ public class DeXNotificationPopup {
         });
         header.addView(btnSettings);
 
-        // Clear Button
+        // Clear Button (Working Clear)
         TextView btnClear = new TextView(context);
         btnClear.setText("Clear");
         btnClear.setTextColor(Color.WHITE);
@@ -103,54 +121,47 @@ public class DeXNotificationPopup {
         clearBg.setColor(Color.parseColor("#33FFFFFF"));
         clearBg.setCornerRadius(dp(context, 12));
         btnClear.setBackground(clearBg);
+
+        final LinearLayout listContainer = new LinearLayout(context);
+        listContainer.setOrientation(LinearLayout.VERTICAL);
+
         btnClear.setOnClickListener(v -> {
+            synchronized (sRecentNotifications) {
+                sRecentNotifications.clear();
+            }
             try {
-                Intent intent = new Intent(DeXNotificationListener.ACTION_CLEAR_NOTIFICATIONS);
+                Intent intent = new Intent(Constants.ACTION_CLEAR_NOTIFICATIONS);
                 context.sendBroadcast(intent);
             } catch (Throwable ignored) {}
-            dismiss();
+            listContainer.removeAllViews();
+            populateEmptyState(context, listContainer);
         });
         header.addView(btnClear);
 
         root.addView(header);
-
         addVerticalSpace(root, context, 12);
 
         // 2. Notification List / ScrollView
         ScrollView scrollView = new ScrollView(context);
-        LinearLayout listContainer = new LinearLayout(context);
-        listContainer.setOrientation(LinearLayout.VERTICAL);
 
-        // Initial loading/empty state
-        populateEmptyState(context, listContainer);
-
-        // Asynchronously load notifications
-        new Thread(() -> {
-            List<SimpleNotificationItem> items = loadRecentNotifications(context);
-            new Handler(Looper.getMainLooper()).post(() -> {
-                if (sCurrentPopup != null && sCurrentPopup.isShowing()) {
-                    listContainer.removeAllViews();
-                    if (items.isEmpty()) {
-                        populateEmptyState(context, listContainer);
-                    } else {
-                        for (SimpleNotificationItem item : items) {
-                            View card = createNotificationCard(context, item);
-                            listContainer.addView(card);
-                            addVerticalSpace(listContainer, context, 8);
-                        }
-                    }
+        synchronized (sRecentNotifications) {
+            if (sRecentNotifications.isEmpty()) {
+                populateEmptyState(context, listContainer);
+            } else {
+                for (SimpleNotificationItem item : sRecentNotifications) {
+                    View card = createNotificationCard(context, item);
+                    listContainer.addView(card);
+                    addVerticalSpace(listContainer, context, 8);
                 }
-            });
-        }).start();
+            }
+        }
 
         scrollView.addView(listContainer);
         LinearLayout.LayoutParams lpScroll = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
         root.addView(scrollView, lpScroll);
 
-        // Max height constraint
         int maxHeight = dp(context, 420);
 
-        // Create PopupWindow
         PopupWindow popup = new PopupWindow(root, width, maxHeight, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
@@ -279,32 +290,6 @@ public class DeXNotificationPopup {
         });
 
         return card;
-    }
-
-    private static List<SimpleNotificationItem> loadRecentNotifications(Context context) {
-        List<SimpleNotificationItem> list = new ArrayList<>();
-        File file = new File(DeXNotificationListener.NOTIF_FILE_PATH);
-        if (file.exists() && file.canRead()) {
-            try {
-                FileInputStream fis = new FileInputStream(file);
-                byte[] data = new byte[(int) file.length()];
-                fis.read(data);
-                fis.close();
-
-                String jsonStr = new String(data, StandardCharsets.UTF_8);
-                JSONArray array = new JSONArray(jsonStr);
-                for (int i = 0; i < array.length(); i++) {
-                    JSONObject obj = array.getJSONObject(i);
-                    SimpleNotificationItem item = new SimpleNotificationItem();
-                    item.packageName = obj.optString("pkg");
-                    item.title = obj.optString("title");
-                    item.text = obj.optString("text");
-                    item.time = obj.optString("time");
-                    list.add(item);
-                }
-            } catch (Throwable ignored) {}
-        }
-        return list;
     }
 
     private static void addVerticalSpace(LinearLayout parent, Context context, int dpVal) {

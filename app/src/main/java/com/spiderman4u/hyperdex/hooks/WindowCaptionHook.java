@@ -1140,11 +1140,32 @@ public class WindowCaptionHook {
 
                     if (!ConfigManager.isClassicWindowControlsEnabled(context)) {
                         ImageButton minBtn = getField(holder, "minimizeWindowButton", ImageButton.class);
-                        if (minBtn != null) minBtn.setVisibility(View.GONE);
+                        if (minBtn != null) {
+                            minBtn.setVisibility(View.GONE);
+                            if (minBtn.getLayoutParams() != null) {
+                                minBtn.getLayoutParams().width = 0;
+                                minBtn.getLayoutParams().height = 0;
+                            }
+                            minBtn.setAlpha(0f);
+                        }
                         ImageButton maxBtn = getField(holder, "maximizeWindowButton", ImageButton.class);
-                        if (maxBtn != null) maxBtn.setVisibility(View.GONE);
+                        if (maxBtn != null) {
+                            maxBtn.setVisibility(View.GONE);
+                            if (maxBtn.getLayoutParams() != null) {
+                                maxBtn.getLayoutParams().width = 0;
+                                maxBtn.getLayoutParams().height = 0;
+                            }
+                            maxBtn.setAlpha(0f);
+                        }
                         ImageButton closeBtn = getField(holder, "closeWindowButton", ImageButton.class);
-                        if (closeBtn != null) closeBtn.setVisibility(View.GONE);
+                        if (closeBtn != null) {
+                            closeBtn.setVisibility(View.GONE);
+                            if (closeBtn.getLayoutParams() != null) {
+                                closeBtn.getLayoutParams().width = 0;
+                                closeBtn.getLayoutParams().height = 0;
+                            }
+                            closeBtn.setAlpha(0f);
+                        }
                         return;
                     }
 

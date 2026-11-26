@@ -211,6 +211,45 @@ public class DeXTaskbarView extends FrameLayout {
         requestLayout();
     }
 
+    private boolean isNotifReceiverRegistered = false;
+    private final android.content.BroadcastReceiver mNotifReceiver = new android.content.BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, android.content.Intent intent) {
+            if (intent != null && com.spiderman4u.hyperdex.config.Constants.ACTION_NEW_NOTIFICATION.equals(intent.getAction())) {
+                String pkg = intent.getStringExtra("pkg");
+                String title = intent.getStringExtra("title");
+                String text = intent.getStringExtra("text");
+                String formattedTime = "now";
+
+                DeXNotificationPopup.addNotification(pkg, title, text, formattedTime);
+                DeXNotificationToastController.showNotificationToast(context, pkg, title, text, formattedTime, systemTrayView);
+            }
+        }
+    };
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (!isNotifReceiverRegistered && getContext() != null) {
+            try {
+                android.content.IntentFilter filter = new android.content.IntentFilter(com.spiderman4u.hyperdex.config.Constants.ACTION_NEW_NOTIFICATION);
+                getContext().registerReceiver(mNotifReceiver, filter);
+                isNotifReceiverRegistered = true;
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        if (isNotifReceiverRegistered && getContext() != null) {
+            try {
+                getContext().unregisterReceiver(mNotifReceiver);
+            } catch (Throwable ignored) {}
+            isNotifReceiverRegistered = false;
+        }
+    }
+
     public DeXDockAppsView getDockAppsView() {
         return dockAppsView;
     }

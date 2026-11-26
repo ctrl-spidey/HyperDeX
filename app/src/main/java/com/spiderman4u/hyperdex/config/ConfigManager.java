@@ -3,16 +3,18 @@ package com.spiderman4u.hyperdex.config;
 import android.content.Context;
 import android.content.Intent;
 import android.provider.Settings;
+import android.text.TextUtils;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import de.robv.android.xposed.XposedBridge;
 
 public class ConfigManager {
 
     private static final String SETTING_DEX_MODE = "hyperdex_mode";
-    private static final String SETTING_EDGE_TO_EDGE = "hyperdex_edge_to_edge";
     private static final String SETTING_START_MENU = "hyperdex_start_menu";
-    private static final String SETTING_DEX_BUTTONS = "hyperdex_dex_buttons";
-    private static final String SETTING_APPLY_NORMAL = "hyperdex_apply_normal";
     private static final String SETTING_SHOW_NAV_BUTTONS = "hyperdex_show_nav_buttons";
     private static final String SETTING_SHOW_SEARCH_BUTTON = "hyperdex_show_search_button";
     private static final String SETTING_FLOATING_POPUPS = "hyperdex_floating_popups";
@@ -20,29 +22,14 @@ public class ConfigManager {
     private static final String SETTING_ICON_SIZE = "hyperdex_icon_size";
     private static final String SETTING_ICON_SPACING = "hyperdex_icon_spacing";
     private static final String SETTING_TASKBAR_OPACITY = "hyperdex_taskbar_opacity";
+    private static final String SETTING_PINNED_PACKAGES = "hyperdex_pinned_packages";
 
     public static boolean isDeXModeEnabled(Context context) {
         return getGlobalBoolean(context, SETTING_DEX_MODE, true);
     }
 
-    public static boolean isEdgeToEdgeEnabled(Context context) {
-        return getGlobalBoolean(context, SETTING_EDGE_TO_EDGE, true);
-    }
-
     public static boolean isStartMenuEnabled(Context context) {
         return getGlobalBoolean(context, SETTING_START_MENU, true);
-    }
-
-    public static boolean isDeXButtonsEnabled(Context context) {
-        return getGlobalBoolean(context, SETTING_DEX_BUTTONS, false);
-    }
-
-    public static boolean isClassicWindowControlsEnabled(Context context) {
-        return false;
-    }
-
-    public static boolean isApplyInNormalModeEnabled(Context context) {
-        return getGlobalBoolean(context, SETTING_APPLY_NORMAL, false);
     }
 
     public static boolean isShowNavButtons(Context context) {
@@ -84,11 +71,8 @@ public class ConfigManager {
 
     public static boolean shouldApplyDeXTaskbar(Context context) {
         if (context == null) return false;
-        if (!isDeXModeEnabled(context) || !isEdgeToEdgeEnabled(context)) {
+        if (!isDeXModeEnabled(context)) {
             return false;
-        }
-        if (isApplyInNormalModeEnabled(context)) {
-            return true;
         }
         return isWorkstationMode(context);
     }
@@ -110,6 +94,64 @@ public class ConfigManager {
         notifyChanged(context);
     }
 
+    // Pinned Packages Customization
+    public static List<String> getPinnedPackages(Context context) {
+        List<String> list = new ArrayList<>();
+        if (context == null) return list;
+        try {
+            String raw = Settings.Global.getString(context.getContentResolver(), SETTING_PINNED_PACKAGES);
+            if (!TextUtils.isEmpty(raw)) {
+                String[] items = raw.split(",");
+                for (String item : items) {
+                    String trimmed = item.trim();
+                    if (!trimmed.isEmpty() && !list.contains(trimmed)) {
+                        list.add(trimmed);
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log("[HyperDeX] Error reading pinned packages: " + t);
+        }
+        return list;
+    }
+
+    public static void setPinnedPackages(Context context, List<String> packages) {
+        if (context == null) return;
+        try {
+            String joined = packages != null ? TextUtils.join(",", packages) : "";
+            Settings.Global.putString(context.getContentResolver(), SETTING_PINNED_PACKAGES, joined);
+        } catch (Throwable t) {
+            try {
+                String joined = packages != null ? TextUtils.join(",", packages) : "";
+                String cmd = "settings put global " + SETTING_PINNED_PACKAGES + " '" + joined + "'";
+                Runtime.getRuntime().exec(new String[]{"su", "-c", cmd});
+            } catch (Throwable ignored) {}
+        }
+        notifyChanged(context);
+    }
+
+    public static void addPinnedPackage(Context context, String pkg) {
+        if (context == null || TextUtils.isEmpty(pkg)) return;
+        List<String> current = getPinnedPackages(context);
+        if (!current.contains(pkg)) {
+            current.add(pkg);
+            setPinnedPackages(context, current);
+        }
+    }
+
+    public static void removePinnedPackage(Context context, String pkg) {
+        if (context == null || TextUtils.isEmpty(pkg)) return;
+        List<String> current = getPinnedPackages(context);
+        if (current.remove(pkg)) {
+            setPinnedPackages(context, current);
+        }
+    }
+
+    public static boolean isPinnedPackage(Context context, String pkg) {
+        if (context == null || TextUtils.isEmpty(pkg)) return false;
+        return getPinnedPackages(context).contains(pkg);
+    }
+
     public static void resetTaskbarDefaults(Context context) {
         setInt(context, Constants.PREF_TASKBAR_HEIGHT, Constants.DEFAULT_TASKBAR_HEIGHT);
         setInt(context, Constants.PREF_ICON_SIZE, Constants.DEFAULT_ICON_SIZE);
@@ -118,7 +160,9 @@ public class ConfigManager {
         setBoolean(context, Constants.PREF_SHOW_NAV_BUTTONS, true);
         setBoolean(context, Constants.PREF_SHOW_SEARCH_BUTTON, true);
         setBoolean(context, Constants.PREF_FLOATING_POPUPS, true);
-        setBoolean(context, Constants.PREF_DEX_BUTTONS, false);
+        try {
+            Settings.Global.putString(context.getContentResolver(), SETTING_PINNED_PACKAGES, "");
+        } catch (Throwable ignored) {}
         notifyChanged(context);
     }
 
@@ -131,10 +175,7 @@ public class ConfigManager {
     }
 
     private static String mapKeyToSetting(String prefKey) {
-        if (Constants.PREF_EDGE_TO_EDGE.equals(prefKey)) return SETTING_EDGE_TO_EDGE;
         if (Constants.PREF_START_MENU.equals(prefKey)) return SETTING_START_MENU;
-        if (Constants.PREF_DEX_BUTTONS.equals(prefKey)) return SETTING_DEX_BUTTONS;
-        if (Constants.PREF_APPLY_NORMAL.equals(prefKey)) return SETTING_APPLY_NORMAL;
         if (Constants.PREF_SHOW_NAV_BUTTONS.equals(prefKey)) return SETTING_SHOW_NAV_BUTTONS;
         if (Constants.PREF_SHOW_SEARCH_BUTTON.equals(prefKey)) return SETTING_SHOW_SEARCH_BUTTON;
         if (Constants.PREF_FLOATING_POPUPS.equals(prefKey)) return SETTING_FLOATING_POPUPS;

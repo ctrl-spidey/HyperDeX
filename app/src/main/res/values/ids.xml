@@ -13,4 +13,6 @@
     <item name="dex_btn_back" type="id" />
     <item name="dex_btn_search" type="id" />
     <item name="dex_btn_apps" type="id" />
+    <item name="dex_running_dot" type="id" />
+    <item name="dex_tray_notification" type="id" />
 </resources>
