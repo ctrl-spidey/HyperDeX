@@ -10,7 +10,9 @@ public final class Constants {
 
     public static final String PREF_FILE = "hyperdex_prefs";
     public static final String PREF_DEX_MODE_ENABLED = "pref_dex_mode_enabled";
+    public static final String PREF_EDGE_TO_EDGE = "pref_edge_to_edge";
     public static final String PREF_START_MENU = "pref_start_menu";
+    public static final String PREF_DEX_BUTTONS = "pref_dex_buttons";
     public static final String PREF_SHOW_NAV_BUTTONS = "pref_show_nav_buttons";
     public static final String PREF_SHOW_SEARCH_BUTTON = "pref_show_search_button";
     public static final String PREF_FLOATING_POPUPS = "pref_floating_popups";

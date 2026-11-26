@@ -32,6 +32,10 @@ public class ConfigManager {
         return getGlobalBoolean(context, SETTING_START_MENU, true);
     }
 
+    public static boolean isClassicWindowControlsEnabled(Context context) {
+        return false;
+    }
+
     public static boolean isShowNavButtons(Context context) {
         return getGlobalBoolean(context, SETTING_SHOW_NAV_BUTTONS, true);
     }
