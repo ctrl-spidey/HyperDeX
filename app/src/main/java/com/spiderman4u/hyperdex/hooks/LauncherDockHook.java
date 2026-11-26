@@ -938,6 +938,19 @@ public class LauncherDockHook {
                 }
                 if (isLaptopOverlay) {
                     dockContainer.setVisibility(View.GONE);
+                    dockContainer.setAlpha(0f);
+                    ViewGroup.LayoutParams lp = dockContainer.getLayoutParams();
+                    if (lp instanceof android.view.WindowManager.LayoutParams) {
+                        android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) lp;
+                        wlp.height = 0;
+                        wlp.alpha = 0f;
+                        android.view.WindowManager wm = (android.view.WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+                        if (wm != null) {
+                            try {
+                                wm.updateViewLayout(dockContainer, wlp);
+                            } catch (Throwable ignored) {}
+                        }
+                    }
                 }
                 return;
             }
@@ -951,6 +964,9 @@ public class LauncherDockHook {
             }
 
             dockContainer.setVisibility(View.VISIBLE);
+            dockContainer.setAlpha(1.0f);
+            dockContainer.setBackground(null);
+            dockContainer.setElevation(0f);
 
             int barHeightDp = ConfigManager.getTaskbarHeight(context);
             int barHeightPx = dp(context, barHeightDp);
@@ -962,6 +978,8 @@ public class LauncherDockHook {
                 if (containerLp instanceof android.view.WindowManager.LayoutParams) {
                     android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) containerLp;
                     wlp.height = barHeightPx;
+                    wlp.alpha = 1.0f;
+                    wlp.format = android.graphics.PixelFormat.TRANSLUCENT;
                     wlp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
                     android.view.WindowManager wm = (android.view.WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
                     if (wm != null) {

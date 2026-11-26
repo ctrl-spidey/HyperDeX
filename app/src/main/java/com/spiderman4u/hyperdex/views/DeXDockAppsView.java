@@ -190,16 +190,13 @@ public class DeXDockAppsView extends HorizontalScrollView {
             itemContainer.addView(dot, lpDot);
         }
 
-        // Click launches or switches to app
+        // Click launches, restores, or minimizes app (Samsung DeX & Windows taskbar toggle behavior)
         itemContainer.setOnClickListener(v -> {
             try {
-                PackageManager pm = context.getPackageManager();
-                Intent launchIntent = pm.getLaunchIntentForPackage(pkg);
-                if (launchIntent != null) {
-                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-                    context.startActivity(launchIntent);
-                }
-            } catch (Throwable ignored) {}
+                handleAppClick(context, pkg);
+            } catch (Throwable t) {
+                XposedBridge.log("[HyperDeX] itemContainer click error: " + t);
+            }
         });
 
         return itemContainer;
@@ -259,6 +256,157 @@ public class DeXDockAppsView extends HorizontalScrollView {
         } catch (Throwable ignored) {}
 
         return null;
+    }
+
+    @SuppressLint("BlockedPrivateApi")
+    private void handleAppClick(Context context, String pkg) {
+        if (context == null || pkg == null) return;
+
+        try {
+            List<?> tasks = null;
+            try {
+                Class<?> atmCls = XposedHelpers.findClassIfExists("android.app.ActivityTaskManager", context.getClassLoader());
+                if (atmCls == null) {
+                    atmCls = Class.forName("android.app.ActivityTaskManager");
+                }
+                Object atm = XposedHelpers.callStaticMethod(atmCls, "getService");
+                tasks = (List<?>) XposedHelpers.callMethod(atm, "getTasks", 50, false, false, 0);
+            } catch (Throwable t) {
+                try {
+                    ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+                    if (am != null) {
+                        tasks = am.getRunningTasks(50);
+                    }
+                } catch (Throwable ignored) {}
+            }
+
+            int targetTaskId = -1;
+            boolean isVisible = false;
+            boolean isFocused = false;
+            boolean isTopNonHomeTask = false;
+
+            if (tasks != null) {
+                boolean foundTopNonHome = false;
+                for (Object task : tasks) {
+                    try {
+                        ComponentName comp = (ComponentName) XposedHelpers.getObjectField(task, "realActivity");
+                        if (comp == null) {
+                            comp = (ComponentName) XposedHelpers.getObjectField(task, "baseActivity");
+                        }
+                        if (comp != null) {
+                            String taskPkg = comp.getPackageName();
+                            if (!taskPkg.equals("com.miui.home") && !taskPkg.contains("systemui") && !taskPkg.equals("android")) {
+                                if (!foundTopNonHome) {
+                                    foundTopNonHome = true;
+                                    if (pkg.equals(taskPkg)) {
+                                        isTopNonHomeTask = true;
+                                    }
+                                }
+                            }
+                            if (pkg.equals(taskPkg)) {
+                                targetTaskId = XposedHelpers.getIntField(task, "taskId");
+                                try {
+                                    isVisible = XposedHelpers.getBooleanField(task, "isVisible");
+                                } catch (Throwable ignored) {}
+                                try {
+                                    isFocused = XposedHelpers.getBooleanField(task, "isFocused");
+                                } catch (Throwable ignored) {}
+                                break;
+                            }
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            }
+
+            // Samsung DeX & Windows taskbar toggle:
+            // If the app is currently showing on display and active/focused:
+            // -> MINIMIZE IT!
+            // Else (app is minimized, backgrounded, behind other windows, or closed):
+            // -> RESTORE / BRING TO FRONT!
+            if (targetTaskId > 0 && (isFocused || (isVisible && isTopNonHomeTask))) {
+                minimizeTask(context, targetTaskId);
+            } else {
+                restoreOrLaunchTask(context, pkg, targetTaskId);
+            }
+        } catch (Throwable t) {
+            XposedBridge.log("[HyperDeX] handleAppClick error: " + t);
+            restoreOrLaunchTask(context, pkg, -1);
+        }
+    }
+
+    private void minimizeTask(Context context, int taskId) {
+        boolean handled = false;
+        // 1. Native Xiaomi Workstation Controller (LaptopSmallWindowProxyWrapper)
+        try {
+            Class<?> wrapperCls = XposedHelpers.findClassIfExists(
+                    "com.miui.home.launcher.laptop.LaptopSmallWindowProxyWrapper",
+                    context.getClassLoader()
+            );
+            if (wrapperCls != null) {
+                Object wrapper = XposedHelpers.callStaticMethod(wrapperCls, "getInstance");
+                if (wrapper != null) {
+                    if (taskId > 0) {
+                        try {
+                            XposedHelpers.callMethod(wrapper, "hideDesktopApps", (Object) new int[]{ taskId });
+                            handled = true;
+                        } catch (Throwable ignored) {}
+                    }
+                    try {
+                        XposedHelpers.callMethod(wrapper, "eludeSmallWindow");
+                        handled = true;
+                    } catch (Throwable ignored) {}
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log("[HyperDeX] LaptopSmallWindowProxyWrapper minimize error: " + t);
+        }
+
+        // 2. Broadcast fallback to SystemUIHook
+        try {
+            Intent intent = new Intent("com.spiderman4u.hyperdex.NAV_TRIGGER");
+            intent.putExtra("nav_action", "minimize_task");
+            intent.putExtra("task_id", taskId);
+            context.sendBroadcast(intent);
+        } catch (Throwable t) {
+            XposedBridge.log("[HyperDeX] Broadcast minimize_task failed: " + t);
+        }
+    }
+
+    private void restoreOrLaunchTask(Context context, String pkg, int taskId) {
+        if (taskId > 0) {
+            try {
+                ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+                if (am != null) {
+                    am.moveTaskToFront(taskId, ActivityManager.MOVE_TASK_WITH_HOME);
+                }
+            } catch (Throwable t) {
+                XposedBridge.log("[HyperDeX] moveTaskToFront failed: " + t);
+            }
+        }
+
+        try {
+            Class<?> wrapperCls = XposedHelpers.findClassIfExists(
+                    "com.miui.home.launcher.laptop.LaptopSmallWindowProxyWrapper",
+                    context.getClassLoader()
+            );
+            if (wrapperCls != null) {
+                Object wrapper = XposedHelpers.callStaticMethod(wrapperCls, "getInstance");
+                if (wrapper != null) {
+                    XposedHelpers.callMethod(wrapper, "showEludedSmallWindow", false);
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        try {
+            PackageManager pm = context.getPackageManager();
+            Intent launchIntent = pm.getLaunchIntentForPackage(pkg);
+            if (launchIntent != null) {
+                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+                context.startActivity(launchIntent);
+            }
+        } catch (Throwable t) {
+            XposedBridge.log("[HyperDeX] startActivity failed: " + t);
+        }
     }
 
     @SuppressLint("BlockedPrivateApi")

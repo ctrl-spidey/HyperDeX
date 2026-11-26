@@ -63,7 +63,8 @@ public class SystemUIHook {
                     String action = intent.getStringExtra(EXTRA_NAV_ACTION);
                     if (action == null) return;
 
-                    handleNavAction(action);
+                    int taskId = intent.getIntExtra("task_id", -1);
+                    handleNavAction(action, taskId);
                 }
             }, filter, Context.RECEIVER_EXPORTED);
             XposedBridge.log(TAG + "SystemUI Nav Receiver registered successfully");
@@ -73,7 +74,14 @@ public class SystemUIHook {
     }
 
     public static void handleNavAction(String action) {
+        handleNavAction(action, -1);
+    }
+
+    public static void handleNavAction(String action, int taskId) {
         switch (action) {
+            case "minimize_task":
+                WindowCaptionHook.performMinimize(sContext, taskId, null);
+                break;
             case "recents":
                 toggleRecents();
                 break;
