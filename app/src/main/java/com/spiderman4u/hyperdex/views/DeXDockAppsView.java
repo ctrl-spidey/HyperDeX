@@ -1,5 +1,6 @@
 package com.spiderman4u.hyperdex.views;
 
+import android.annotation.SuppressLint;
 import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -260,14 +261,16 @@ public class DeXDockAppsView extends HorizontalScrollView {
         return null;
     }
 
+    @SuppressLint("BlockedPrivateApi")
     private Set<String> getActuallyRunningPackages(Context context) {
         Set<String> running = new HashSet<>();
         try {
-            Class<?> atmCls = Class.forName("android.app.ActivityTaskManager");
-            Method getService = atmCls.getDeclaredMethod("getService");
-            Object atm = getService.invoke(null);
-            Method getTasks = atm.getClass().getDeclaredMethod("getTasks", int.class, boolean.class, boolean.class, int.class);
-            List<?> tasks = (List<?>) getTasks.invoke(atm, 50, false, false, 0);
+            Class<?> atmCls = XposedHelpers.findClassIfExists("android.app.ActivityTaskManager", context.getClassLoader());
+            if (atmCls == null) {
+                atmCls = Class.forName("android.app.ActivityTaskManager");
+            }
+            Object atm = XposedHelpers.callStaticMethod(atmCls, "getService");
+            List<?> tasks = (List<?>) XposedHelpers.callMethod(atm, "getTasks", 50, false, false, 0);
             if (tasks != null) {
                 for (Object task : tasks) {
                     try {
