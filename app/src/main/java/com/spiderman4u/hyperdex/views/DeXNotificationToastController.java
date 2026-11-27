@@ -9,6 +9,7 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
@@ -19,10 +20,10 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
-import android.view.animation.AccelerateInterpolator;
-import android.view.animation.DecelerateInterpolator;
+import android.view.animation.PathInterpolator;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.PopupWindow;
 import android.widget.TextView;
 
 import com.spiderman4u.hyperdex.config.ConfigManager;
@@ -30,6 +31,7 @@ import com.spiderman4u.hyperdex.config.ConfigManager;
 public class DeXNotificationToastController {
 
     private static View sCurrentToastView = null;
+    private static PopupWindow sCurrentPopupWindow = null;
     private static final Handler sHandler = new Handler(Looper.getMainLooper());
     private static Runnable sDismissRunnable = null;
 
@@ -40,19 +42,7 @@ public class DeXNotificationToastController {
         sHandler.post(() -> {
             try {
                 final WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
-                if (wm == null) return;
-
-                // Dismiss any existing toast first
-                if (sCurrentToastView != null) {
-                    try {
-                        wm.removeView(sCurrentToastView);
-                    } catch (Throwable ignored) {}
-                    sCurrentToastView = null;
-                }
-                if (sDismissRunnable != null) {
-                    sHandler.removeCallbacks(sDismissRunnable);
-                    sDismissRunnable = null;
-                }
+                cleanupCurrentToast(wm);
 
                 PackageManager pm = context.getPackageManager();
                 String appLabel = pkg;
@@ -71,9 +61,9 @@ public class DeXNotificationToastController {
                 card.setPadding(padH, padV, padH, padV);
 
                 GradientDrawable bg = new GradientDrawable();
-                bg.setColor(Color.parseColor("#E61E212B"));
+                bg.setColor(Color.parseColor("#EB1C1E26"));
                 bg.setCornerRadius(dp(context, 14));
-                bg.setStroke(dp(context, 1), Color.parseColor("#33FFFFFF"));
+                bg.setStroke(dp(context, 1), Color.parseColor("#38FFFFFF"));
                 card.setBackground(bg);
                 card.setElevation(dp(context, 12));
 
@@ -100,7 +90,7 @@ public class DeXNotificationToastController {
                 header.addView(tvApp, lpApp);
 
                 TextView tvTime = new TextView(context);
-                tvTime.setText("now");
+                tvTime.setText(!TextUtils.isEmpty(time) ? time : "now");
                 tvTime.setTextColor(Color.parseColor("#80838E"));
                 tvTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
                 header.addView(tvTime);
@@ -146,70 +136,125 @@ public class DeXNotificationToastController {
                     dismissToastImmersive(wm, card, trayView);
                 });
 
-                // LayoutParams for WindowManager
                 int barHeight = ConfigManager.getTaskbarHeight(context);
                 int cardWidth = dp(context, 290);
-                WindowManager.LayoutParams wlp = new WindowManager.LayoutParams(
-                        cardWidth,
-                        WindowManager.LayoutParams.WRAP_CONTENT,
-                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                        PixelFormat.TRANSLUCENT
-                );
-                wlp.gravity = Gravity.BOTTOM | Gravity.END;
-                wlp.x = dp(context, 16);
-                wlp.y = dp(context, barHeight + 10);
+                int xOffset = dp(context, 14);
+                int yOffset = dp(context, barHeight + 10);
 
-                wm.addView(card, wlp);
-                sCurrentToastView = card;
+                boolean addedOverlay = false;
+                if (wm != null) {
+                    try {
+                        WindowManager.LayoutParams wlp = new WindowManager.LayoutParams(
+                                cardWidth,
+                                WindowManager.LayoutParams.WRAP_CONTENT,
+                                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                                PixelFormat.TRANSLUCENT
+                        );
+                        wlp.gravity = Gravity.BOTTOM | Gravity.END;
+                        wlp.x = xOffset;
+                        wlp.y = yOffset;
+                        wm.addView(card, wlp);
+                        sCurrentToastView = card;
+                        addedOverlay = true;
+                    } catch (Throwable ignored) {}
+                }
 
-                // 1. Fluid Entrance Animation (macOS/DeX spring curve)
+                // Fallback to non-focusable PopupWindow anchored to systemTrayView if overlay fails
+                if (!addedOverlay && trayView != null && trayView.isAttachedToWindow()) {
+                    PopupWindow pw = new PopupWindow(card, cardWidth, ViewGroup.LayoutParams.WRAP_CONTENT, false);
+                    pw.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+                    pw.setOutsideTouchable(false);
+                    pw.setTouchable(true);
+                    pw.setElevation(dp(context, 12));
+                    pw.showAtLocation(trayView, Gravity.BOTTOM | Gravity.END, xOffset, yOffset);
+                    sCurrentPopupWindow = pw;
+                    sCurrentToastView = card;
+                    addedOverlay = true;
+                }
+
+                if (!addedOverlay) return;
+
+                // 1. Fluid macOS-like Entrance Animation
                 card.setAlpha(0f);
-                card.setScaleX(0.88f);
-                card.setScaleY(0.88f);
-                card.setTranslationY(dp(context, 16));
+                card.setScaleX(0.86f);
+                card.setScaleY(0.86f);
+                card.setTranslationY(dp(context, 18));
                 card.animate()
                         .alpha(1.0f)
                         .scaleX(1.0f)
                         .scaleY(1.0f)
                         .translationY(0f)
-                        .setDuration(320)
-                        .setInterpolator(new DecelerateInterpolator(1.8f))
+                        .setDuration(300)
+                        .setInterpolator(new PathInterpolator(0.22f, 1.0f, 0.36f, 1.0f))
                         .start();
 
-                // 2. Schedule Immersive Ingestion Animation after 3.8s
+                // 2. Schedule Immersive Ingestion directly into the notification bell after 3.4s
                 sDismissRunnable = () -> dismissToastImmersive(wm, card, trayView);
-                sHandler.postDelayed(sDismissRunnable, 3800);
+                sHandler.postDelayed(sDismissRunnable, 3400);
 
-            } catch (Throwable t) {
-                // WindowManager overlay fallback
-            }
+            } catch (Throwable ignored) {}
         });
+    }
+
+    private static void cleanupCurrentToast(WindowManager wm) {
+        if (sDismissRunnable != null) {
+            sHandler.removeCallbacks(sDismissRunnable);
+            sDismissRunnable = null;
+        }
+        if (sCurrentPopupWindow != null) {
+            try {
+                sCurrentPopupWindow.dismiss();
+            } catch (Throwable ignored) {}
+            sCurrentPopupWindow = null;
+        }
+        if (sCurrentToastView != null && wm != null) {
+            try {
+                wm.removeView(sCurrentToastView);
+            } catch (Throwable ignored) {}
+            sCurrentToastView = null;
+        }
     }
 
     private static void dismissToastImmersive(WindowManager wm, View card, DeXSystemTrayView trayView) {
         if (card == null) return;
         try {
-            card.setPivotX(card.getWidth() * 0.9f);
-            card.setPivotY(card.getHeight());
+            float targetDx = dp(card.getContext(), 24);
+            float targetDy = dp(card.getContext(), 34);
+
+            View bellIcon = trayView != null ? trayView.getNotificationIcon() : null;
+            if (bellIcon != null && bellIcon.isAttachedToWindow() && card.isAttachedToWindow()) {
+                int[] cardLoc = new int[2];
+                int[] bellLoc = new int[2];
+                card.getLocationOnScreen(cardLoc);
+                bellIcon.getLocationOnScreen(bellLoc);
+
+                float cardCenterX = cardLoc[0] + card.getWidth() * 0.5f;
+                float cardCenterY = cardLoc[1] + card.getHeight() * 0.5f;
+                float bellCenterX = bellLoc[0] + bellIcon.getWidth() * 0.5f;
+                float bellCenterY = bellLoc[1] + bellIcon.getHeight() * 0.5f;
+
+                if (bellCenterX > 0 && bellCenterY > 0) {
+                    targetDx = bellCenterX - cardCenterX;
+                    targetDy = bellCenterY - cardCenterY;
+                }
+            }
+
+            card.setPivotX(card.getWidth() * 0.5f);
+            card.setPivotY(card.getHeight() * 0.5f);
 
             card.animate()
                     .alpha(0.0f)
-                    .scaleX(0.12f)
-                    .scaleY(0.12f)
-                    .translationY(30f)
-                    .setDuration(340)
-                    .setInterpolator(new AccelerateInterpolator(1.6f))
+                    .scaleX(0.08f)
+                    .scaleY(0.08f)
+                    .translationX(targetDx)
+                    .translationY(targetDy)
+                    .setDuration(320)
+                    .setInterpolator(new PathInterpolator(0.32f, 0.0f, 0.15f, 1.0f))
                     .setListener(new AnimatorListenerAdapter() {
                         @Override
                         public void onAnimationEnd(Animator animation) {
-                            try {
-                                wm.removeView(card);
-                            } catch (Throwable ignored) {}
-                            if (sCurrentToastView == card) {
-                                sCurrentToastView = null;
-                            }
-                            // Pulse notification bell when immersed
+                            removeToastViews(wm, card);
                             if (trayView != null) {
                                 trayView.pulseNotificationBell();
                             }
@@ -217,12 +262,24 @@ public class DeXNotificationToastController {
                     })
                     .start();
         } catch (Throwable t) {
+            removeToastViews(wm, card);
+        }
+    }
+
+    private static void removeToastViews(WindowManager wm, View card) {
+        if (sCurrentPopupWindow != null) {
+            try {
+                sCurrentPopupWindow.dismiss();
+            } catch (Throwable ignored) {}
+            sCurrentPopupWindow = null;
+        }
+        if (wm != null && card != null) {
             try {
                 wm.removeView(card);
             } catch (Throwable ignored) {}
-            if (sCurrentToastView == card) {
-                sCurrentToastView = null;
-            }
+        }
+        if (sCurrentToastView == card) {
+            sCurrentToastView = null;
         }
     }
 

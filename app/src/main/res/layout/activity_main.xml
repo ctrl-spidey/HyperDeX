@@ -525,6 +525,7 @@
 
             <!-- Authentic Developer Credit Footer -->
             <TextView
+                android:id="@+id/tv_footer_credit"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:gravity="center"

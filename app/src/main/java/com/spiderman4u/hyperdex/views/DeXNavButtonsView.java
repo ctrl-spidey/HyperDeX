@@ -50,7 +50,10 @@ public class DeXNavButtonsView extends LinearLayout {
         btnRecents = createIconButton(context, btnSize, iconPadding);
         btnRecents.setId(R.id.dex_btn_recents);
         btnRecents.setImageDrawable(DeXVectorDrawables.createRecentsDrawable(iconColor));
-        btnRecents.setOnClickListener(v -> sendNavAction(context, "recents"));
+        btnRecents.setOnClickListener(v -> {
+            bounce(v);
+            sendNavAction(context, "recents");
+        });
         addView(btnRecents);
 
         // 2. Home Button [ ◯ ]
@@ -58,6 +61,7 @@ public class DeXNavButtonsView extends LinearLayout {
         btnHome.setId(R.id.dex_btn_home);
         btnHome.setImageDrawable(DeXVectorDrawables.createHomeDrawable(iconColor));
         btnHome.setOnClickListener(v -> {
+            bounce(v);
             sendNavAction(context, "home");
             triggerHome(context);
         });
@@ -67,24 +71,42 @@ public class DeXNavButtonsView extends LinearLayout {
         btnBack = createIconButton(context, btnSize, iconPadding);
         btnBack.setId(R.id.dex_btn_back);
         btnBack.setImageDrawable(DeXVectorDrawables.createBackDrawable(iconColor));
-        btnBack.setOnClickListener(v -> sendNavAction(context, "back"));
+        btnBack.setOnClickListener(v -> {
+            bounce(v);
+            sendNavAction(context, "back");
+        });
         addView(btnBack);
 
         // 4. Search Button [ Q ]
         btnSearch = createIconButton(context, btnSize, iconPadding);
         btnSearch.setId(R.id.dex_btn_search);
         btnSearch.setImageDrawable(DeXVectorDrawables.createSearchDrawable(iconColor));
-        btnSearch.setOnClickListener(v -> triggerSearch(context));
+        btnSearch.setOnClickListener(v -> {
+            bounce(v);
+            triggerSearch(context);
+        });
         addView(btnSearch);
 
         // 5. Apps Drawer Button [ ::: ]
         btnApps = createIconButton(context, btnSize, iconPadding);
         btnApps.setId(R.id.dex_btn_apps);
         btnApps.setImageDrawable(DeXVectorDrawables.createAppsDrawable(iconColor));
-        btnApps.setOnClickListener(v -> toggleAppDrawer(context));
+        btnApps.setOnClickListener(v -> {
+            bounce(v);
+            toggleAppDrawer(context);
+        });
         addView(btnApps);
 
         updateVisibilityConfig(context);
+    }
+
+    private void bounce(View v) {
+        if (v == null) return;
+        v.animate().cancel();
+        v.animate().scaleX(0.86f).scaleY(0.86f).setDuration(80).withEndAction(() ->
+                v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(150)
+                        .setInterpolator(new android.view.animation.OvershootInterpolator(1.6f)).start()
+        ).start();
     }
 
     public void updateVisibilityConfig(Context context) {

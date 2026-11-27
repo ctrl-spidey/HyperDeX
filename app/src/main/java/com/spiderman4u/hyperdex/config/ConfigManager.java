@@ -151,6 +151,18 @@ public class ConfigManager {
         }
     }
 
+    public static boolean movePinnedPackage(Context context, String pkg, int delta) {
+        if (context == null || TextUtils.isEmpty(pkg) || delta == 0) return false;
+        List<String> current = getPinnedPackages(context);
+        int idx = current.indexOf(pkg);
+        if (idx < 0) return false;
+        int targetIdx = idx + delta;
+        if (targetIdx < 0 || targetIdx >= current.size()) return false;
+        java.util.Collections.swap(current, idx, targetIdx);
+        setPinnedPackages(context, current);
+        return true;
+    }
+
     public static boolean isPinnedPackage(Context context, String pkg) {
         if (context == null || TextUtils.isEmpty(pkg)) return false;
         return getPinnedPackages(context).contains(pkg);

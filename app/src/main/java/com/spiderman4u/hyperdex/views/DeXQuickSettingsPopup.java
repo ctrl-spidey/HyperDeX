@@ -297,6 +297,20 @@ public class DeXQuickSettingsPopup {
         int yOffset = dp(context, ConfigManager.getTaskbarHeight(context) + 6);
         popup.showAtLocation(anchorView, Gravity.BOTTOM | Gravity.END, xOffset, yOffset);
         sCurrentPopup = popup;
+
+        // Smooth macOS-like popup entrance
+        root.setAlpha(0f);
+        root.setScaleX(0.92f);
+        root.setScaleY(0.92f);
+        root.setTranslationY(dp(context, 14));
+        root.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .translationY(0f)
+                .setDuration(240)
+                .setInterpolator(new android.view.animation.PathInterpolator(0.22f, 1.0f, 0.36f, 1.0f))
+                .start();
     }
 
     public static void dismiss() {

@@ -516,7 +516,6 @@ public class LauncherDockHook {
             "com.miui.home.launcher.hotseats.HotSeatsListContentNormalBackground",
             "com.miui.home.launcher.hotseats.HotSeatsListContentBlurBackground",
             "com.miui.home.launcher.hotseats.HotSeatsListContentBlurBackground2",
-            "com.miui.home.launcher.hotseats.HotSeatsListContentBackground",
             "com.miui.home.launcher.dock.IconDraggingBackgroundView",
             "com.miui.home.launcher.dock.SplitWindowBackgroundView"
         };
@@ -1160,8 +1159,8 @@ public class LauncherDockHook {
         dockContainer.post(() -> {
             try {
                 dockContainer.animate().cancel();
-                dockContainer.animate().translationY(0f).setDuration(220)
-                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+                dockContainer.animate().translationY(0f).setDuration(280)
+                        .setInterpolator(new android.view.animation.PathInterpolator(0.22f, 1.0f, 0.36f, 1.0f)).start();
                 ViewGroup.LayoutParams lp = dockContainer.getLayoutParams();
                 if (lp instanceof android.view.WindowManager.LayoutParams) {
                     android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) lp;

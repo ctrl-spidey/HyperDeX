@@ -215,14 +215,35 @@ public class DeXTaskbarView extends FrameLayout {
     private final android.content.BroadcastReceiver mNotifReceiver = new android.content.BroadcastReceiver() {
         @Override
         public void onReceive(Context context, android.content.Intent intent) {
-            if (intent != null && com.spiderman4u.hyperdex.config.Constants.ACTION_NEW_NOTIFICATION.equals(intent.getAction())) {
+            if (intent == null || intent.getAction() == null) return;
+            String action = intent.getAction();
+            if (com.spiderman4u.hyperdex.config.Constants.ACTION_NEW_NOTIFICATION.equals(action)) {
                 String pkg = intent.getStringExtra("pkg");
                 String title = intent.getStringExtra("title");
                 String text = intent.getStringExtra("text");
+                String key = intent.getStringExtra("key");
+                boolean syncOnly = intent.getBooleanExtra("sync_only", false);
                 String formattedTime = "now";
 
-                DeXNotificationPopup.addNotification(pkg, title, text, formattedTime);
-                DeXNotificationToastController.showNotificationToast(context, pkg, title, text, formattedTime, systemTrayView);
+                DeXNotificationPopup.addNotification(pkg, title, text, formattedTime, key);
+                if (systemTrayView != null) {
+                    systemTrayView.updateNotificationBadge(DeXNotificationPopup.getCount());
+                }
+                if (!syncOnly) {
+                    DeXNotificationToastController.showNotificationToast(context, pkg, title, text, formattedTime, systemTrayView);
+                }
+            } else if (com.spiderman4u.hyperdex.config.Constants.ACTION_REMOVE_NOTIFICATION.equals(action)) {
+                String key = intent.getStringExtra("key");
+                String pkg = intent.getStringExtra("pkg");
+                DeXNotificationPopup.removeNotification(key, pkg);
+                if (systemTrayView != null) {
+                    systemTrayView.updateNotificationBadge(DeXNotificationPopup.getCount());
+                }
+            } else if (com.spiderman4u.hyperdex.config.Constants.ACTION_CLEAR_NOTIFICATIONS.equals(action)) {
+                DeXNotificationPopup.clearAll();
+                if (systemTrayView != null) {
+                    systemTrayView.updateNotificationBadge(0);
+                }
             }
         }
     };
@@ -232,7 +253,10 @@ public class DeXTaskbarView extends FrameLayout {
         super.onAttachedToWindow();
         if (!isNotifReceiverRegistered && getContext() != null) {
             try {
-                android.content.IntentFilter filter = new android.content.IntentFilter(com.spiderman4u.hyperdex.config.Constants.ACTION_NEW_NOTIFICATION);
+                android.content.IntentFilter filter = new android.content.IntentFilter();
+                filter.addAction(com.spiderman4u.hyperdex.config.Constants.ACTION_NEW_NOTIFICATION);
+                filter.addAction(com.spiderman4u.hyperdex.config.Constants.ACTION_REMOVE_NOTIFICATION);
+                filter.addAction(com.spiderman4u.hyperdex.config.Constants.ACTION_CLEAR_NOTIFICATIONS);
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
                     getContext().registerReceiver(mNotifReceiver, filter, Context.RECEIVER_EXPORTED);
                 } else {
@@ -240,6 +264,9 @@ public class DeXTaskbarView extends FrameLayout {
                 }
                 isNotifReceiverRegistered = true;
             } catch (Throwable ignored) {}
+        }
+        if (systemTrayView != null) {
+            systemTrayView.updateNotificationBadge(DeXNotificationPopup.getCount());
         }
     }
 

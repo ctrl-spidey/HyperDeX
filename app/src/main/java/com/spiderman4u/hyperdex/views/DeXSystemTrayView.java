@@ -14,6 +14,8 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.OvershootInterpolator;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -32,6 +34,7 @@ public class DeXSystemTrayView extends LinearLayout {
     private ImageView ivBattery;
     private ImageView ivWifi;
     private ImageView ivNotification;
+    private View vNotifBadge;
     private ImageView ivVolume;
     private ImageView ivScreenshot;
     private View vDesktopStrip;
@@ -90,11 +93,7 @@ public class DeXSystemTrayView extends LinearLayout {
         ivScreenshot.setPadding(dp(4), dp(4), dp(4), dp(4));
         ivScreenshot.setImageDrawable(DeXVectorDrawables.createScreenshotDrawable(iconColor));
         ivScreenshot.setOnClickListener(v -> {
-            try {
-                Intent scIntent = new Intent("com.miui.screenshot.action.SCREENSHOT");
-                scIntent.setPackage("com.miui.screenshot");
-                context.sendBroadcast(scIntent);
-            } catch (Throwable ignored) {}
+            animateTapBounce(v);
             DeXNavButtonsView.sendNavAction(context, "screenshot");
         });
         addView(ivScreenshot, new LayoutParams(btnSize, btnSize));
@@ -103,20 +102,43 @@ public class DeXSystemTrayView extends LinearLayout {
         ivVolume = new ImageView(context);
         ivVolume.setPadding(dp(4), dp(4), dp(4), dp(4));
         ivVolume.setImageDrawable(DeXVectorDrawables.createVolumeDrawable(iconColor, false));
-        ivVolume.setOnClickListener(v -> onQuickSettingsClicked(context, v));
+        ivVolume.setOnClickListener(v -> {
+            animateTapBounce(v);
+            onQuickSettingsClicked(context, v);
+        });
         LayoutParams lpVol = new LayoutParams(btnSize, btnSize);
         lpVol.setMarginStart(dp(2));
         addView(ivVolume, lpVol);
 
-        // 3. Notification Bell Button
+        // 3. Notification Bell Button + Unread Badge
+        FrameLayout notifWrapper = new FrameLayout(context);
+        notifWrapper.setId(com.spiderman4u.hyperdex.R.id.dex_tray_notification);
         ivNotification = new ImageView(context);
-        ivNotification.setId(com.spiderman4u.hyperdex.R.id.dex_tray_notification);
         ivNotification.setPadding(dp(4), dp(4), dp(4), dp(4));
         ivNotification.setImageDrawable(DeXVectorDrawables.createBellDrawable(iconColor));
-        ivNotification.setOnClickListener(v -> onNotificationClicked(context, v));
+        notifWrapper.addView(ivNotification, new FrameLayout.LayoutParams(btnSize, btnSize));
+
+        vNotifBadge = new View(context);
+        vNotifBadge.setId(com.spiderman4u.hyperdex.R.id.dex_tray_notif_badge);
+        GradientDrawable badgeBg = new GradientDrawable();
+        badgeBg.setShape(GradientDrawable.OVAL);
+        badgeBg.setColor(Color.parseColor("#0A84FF"));
+        badgeBg.setStroke(dp(1), Color.parseColor("#FF141518"));
+        vNotifBadge.setBackground(badgeBg);
+        FrameLayout.LayoutParams lpBadge = new FrameLayout.LayoutParams(dp(7), dp(7));
+        lpBadge.gravity = Gravity.TOP | Gravity.END;
+        lpBadge.topMargin = dp(4);
+        lpBadge.rightMargin = dp(4);
+        vNotifBadge.setVisibility(DeXNotificationPopup.getCount() > 0 ? View.VISIBLE : View.GONE);
+        notifWrapper.addView(vNotifBadge, lpBadge);
+
+        notifWrapper.setOnClickListener(v -> {
+            animateTapBounce(v);
+            onNotificationClicked(context, v);
+        });
         LayoutParams lpNotif = new LayoutParams(btnSize, btnSize);
         lpNotif.setMarginStart(dp(2));
-        addView(ivNotification, lpNotif);
+        addView(notifWrapper, lpNotif);
 
         // 4. Wi-Fi Icon
         ivWifi = new ImageView(context);
@@ -227,18 +249,37 @@ public class DeXSystemTrayView extends LinearLayout {
         return ivNotification;
     }
 
+    private void animateTapBounce(View v) {
+        if (v == null) return;
+        v.animate().cancel();
+        v.animate().scaleX(0.88f).scaleY(0.88f).setDuration(80).withEndAction(() ->
+                v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(140)
+                        .setInterpolator(new OvershootInterpolator(1.6f)).start()
+        ).start();
+    }
+
+    public void updateNotificationBadge(int count) {
+        post(() -> {
+            if (vNotifBadge != null) {
+                vNotifBadge.setVisibility(count > 0 ? View.VISIBLE : View.GONE);
+            }
+        });
+    }
+
     public void pulseNotificationBell() {
+        updateNotificationBadge(DeXNotificationPopup.getCount());
         if (ivNotification == null) return;
         ivNotification.animate()
-                .scaleX(1.3f)
-                .scaleY(1.3f)
-                .setDuration(160)
+                .scaleX(1.32f)
+                .scaleY(1.32f)
+                .setDuration(150)
                 .withEndAction(() -> {
                     if (ivNotification != null) {
                         ivNotification.animate()
                                 .scaleX(1.0f)
                                 .scaleY(1.0f)
-                                .setDuration(200)
+                                .setDuration(220)
+                                .setInterpolator(new OvershootInterpolator(1.8f))
                                 .start();
                     }
                 })
@@ -247,7 +288,7 @@ public class DeXSystemTrayView extends LinearLayout {
 
     private void onNotificationClicked(Context context, View v) {
         if (ConfigManager.isFloatingPopupsEnabled(context)) {
-            DeXNotificationPopup.show(context, v);
+            DeXNotificationPopup.show(context, v, this);
         } else {
             expandNotifications(context);
         }

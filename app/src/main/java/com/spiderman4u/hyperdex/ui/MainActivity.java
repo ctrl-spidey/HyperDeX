@@ -69,6 +69,10 @@ public class MainActivity extends AppCompatActivity {
         btnResetDefaults = findViewById(R.id.btn_reset_defaults);
 
         btnRestart = findViewById(R.id.btn_restart);
+        TextView tvFooterCredit = findViewById(R.id.tv_footer_credit);
+        if (tvFooterCredit != null) {
+            tvFooterCredit.setText(getString(R.string.footer_credit, getCurrentVersionName()));
+        }
 
         seekTaskbarHeight.setMax(MAX_TASKBAR_HEIGHT - MIN_TASKBAR_HEIGHT);
         seekIconSize.setMax(MAX_ICON_SIZE - MIN_ICON_SIZE);
@@ -227,8 +231,16 @@ public class MainActivity extends AppCompatActivity {
         btnResetDefaults.setEnabled(enabled);
     }
 
+    private String getCurrentVersionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Throwable ignored) {
+            return Constants.APP_VERSION_NAME;
+        }
+    }
+
     private void restartLauncher() {
-        Toast.makeText(this, R.string.toast_restarted, Toast.LENGTH_LONG).show();
+        Toast.makeText(this, getString(R.string.toast_restarted, getCurrentVersionName()), Toast.LENGTH_LONG).show();
 
         new Thread(() -> {
             try {

@@ -30,6 +30,8 @@ public final class Constants {
     public static final String ACTION_NAV_TRIGGER = "com.spiderman4u.hyperdex.ACTION_NAV_TRIGGER";
     public static final String EXTRA_NAV_ACTION = "nav_action";
     public static final String ACTION_NEW_NOTIFICATION = "com.spiderman4u.hyperdex.ACTION_NEW_NOTIFICATION";
+    public static final String ACTION_REMOVE_NOTIFICATION = "com.spiderman4u.hyperdex.ACTION_REMOVE_NOTIFICATION";
+    public static final String ACTION_DISMISS_NOTIFICATION = "com.spiderman4u.hyperdex.ACTION_DISMISS_NOTIFICATION";
     public static final String ACTION_CLEAR_NOTIFICATIONS = "com.spiderman4u.hyperdex.ACTION_CLEAR_NOTIFICATIONS";
     public static final String ACTION_RESET_DOCK_BOTTOM = "com.spiderman4u.hyperdex.ACTION_RESET_DOCK_BOTTOM";
 
@@ -45,5 +47,5 @@ public final class Constants {
 
     // Developer Branding
     public static final String DEVELOPER_TAG = "@spideyHyperOS";
-    public static final String APP_VERSION_NAME = "1.1.11";
+    public static final String APP_VERSION_NAME = "1.1.14";
 }

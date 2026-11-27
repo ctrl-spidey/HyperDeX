@@ -2,6 +2,7 @@ package com.spiderman4u.hyperdex.views;
 
 import android.annotation.SuppressLint;
 import android.app.ActivityManager;
+import android.app.ActivityOptions;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
@@ -24,8 +25,8 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
+import android.view.animation.PathInterpolator;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
@@ -37,11 +38,9 @@ import com.spiderman4u.hyperdex.R;
 import com.spiderman4u.hyperdex.config.ConfigManager;
 import com.spiderman4u.hyperdex.config.Constants;
 import com.spiderman4u.hyperdex.hooks.LauncherDockHook;
-import com.spiderman4u.hyperdex.hooks.SystemUIHook;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -62,7 +61,9 @@ public class DeXDockAppsView extends HorizontalScrollView {
 
     // Asynchronous thread-safe running task cache (0ms main thread delay on click)
     private final Map<String, Integer> mRunningTaskMap = new ConcurrentHashMap<>();
+    private final Set<String> mVisibleTaskPkgs = ConcurrentHashMap.newKeySet();
     private volatile String mFocusedTaskPkg = null;
+    private final Set<String> mLastDisplayedRunningPkgs = new HashSet<>();
     private ScheduledExecutorService mTaskScheduler = null;
 
     public DeXDockAppsView(Context context) {
@@ -105,10 +106,16 @@ public class DeXDockAppsView extends HorizontalScrollView {
         mTaskScheduler = Executors.newSingleThreadScheduledExecutor();
         mTaskScheduler.scheduleWithFixedDelay(() -> {
             try {
-                updateRunningTasksCache(getContext());
-                mMainHandler.post(this::updateRunningDotsUi);
+                boolean unpinnedChanged = updateRunningTasksCache(getContext());
+                mMainHandler.post(() -> {
+                    if (unpinnedChanged) {
+                        reloadApps(getContext());
+                    } else {
+                        updateRunningDotsUi();
+                    }
+                });
             } catch (Throwable ignored) {}
-        }, 1, 2, TimeUnit.SECONDS);
+        }, 400, 1200, TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -120,11 +127,12 @@ public class DeXDockAppsView extends HorizontalScrollView {
         }
     }
 
-    // 1. Asynchronous Background Task Query (Never blocks UI thread)
+    // 1. Asynchronous Background Task Query (strictly filters truly running & visible tasks)
     @SuppressLint("BlockedPrivateApi")
-    private void updateRunningTasksCache(Context context) {
-        if (context == null) return;
+    private boolean updateRunningTasksCache(Context context) {
+        if (context == null) return false;
         Map<String, Integer> newMap = new ConcurrentHashMap<>();
+        Set<String> newVisible = new HashSet<>();
         String topFocusedPkg = null;
 
         try {
@@ -138,23 +146,53 @@ public class DeXDockAppsView extends HorizontalScrollView {
             if (tasks != null) {
                 for (Object task : tasks) {
                     try {
+                        boolean isRunning = true;
+                        try {
+                            isRunning = XposedHelpers.getBooleanField(task, "isRunning");
+                        } catch (Throwable ignored) {}
+
+                        int numActivities = 1;
+                        try {
+                            numActivities = XposedHelpers.getIntField(task, "numActivities");
+                        } catch (Throwable ignored) {}
+
+                        int topActivityType = 1;
+                        try {
+                            topActivityType = XposedHelpers.getIntField(task, "topActivityType");
+                        } catch (Throwable ignored) {}
+
+                        // Skip dead, empty, launcher/recents/assistant tasks
+                        if (!isRunning || numActivities <= 0 || topActivityType > 1) {
+                            continue;
+                        }
+
                         ComponentName comp = (ComponentName) XposedHelpers.getObjectField(task, "realActivity");
+                        if (comp == null) {
+                            comp = (ComponentName) XposedHelpers.getObjectField(task, "topActivity");
+                        }
                         if (comp == null) {
                             comp = (ComponentName) XposedHelpers.getObjectField(task, "baseActivity");
                         }
                         if (comp != null) {
                             String pkg = comp.getPackageName();
-                            if (!pkg.equals("com.miui.home") && !pkg.contains("systemui") && !pkg.equals("android")) {
+                            if (!pkg.equals("com.miui.home") && !pkg.contains("systemui") && !pkg.equals("android") && !pkg.equals(Constants.PACKAGE_NAME)) {
                                 int taskId = XposedHelpers.getIntField(task, "taskId");
                                 boolean isFocused = false;
+                                boolean isVisible = false;
                                 try {
                                     isFocused = XposedHelpers.getBooleanField(task, "isFocused");
+                                } catch (Throwable ignored) {}
+                                try {
+                                    isVisible = XposedHelpers.getBooleanField(task, "isVisible");
                                 } catch (Throwable ignored) {}
 
                                 if (!newMap.containsKey(pkg)) {
                                     newMap.put(pkg, taskId);
                                 }
-                                if (isFocused && topFocusedPkg == null) {
+                                if (isVisible) {
+                                    newVisible.add(pkg);
+                                }
+                                if ((isFocused || (isVisible && topFocusedPkg == null)) && topFocusedPkg == null) {
                                     topFocusedPkg = pkg;
                                 }
                             }
@@ -169,6 +207,7 @@ public class DeXDockAppsView extends HorizontalScrollView {
                     List<ActivityManager.RunningTaskInfo> list = am.getRunningTasks(30);
                     if (list != null) {
                         for (ActivityManager.RunningTaskInfo info : list) {
+                            if (info.numRunning <= 0) continue;
                             ComponentName comp = (ComponentName) XposedHelpers.getObjectField(info, "realActivity");
                             if (comp == null) {
                                 comp = (ComponentName) XposedHelpers.getObjectField(info, "baseActivity");
@@ -190,12 +229,22 @@ public class DeXDockAppsView extends HorizontalScrollView {
 
         mRunningTaskMap.clear();
         mRunningTaskMap.putAll(newMap);
+        mVisibleTaskPkgs.clear();
+        mVisibleTaskPkgs.addAll(newVisible);
         mFocusedTaskPkg = topFocusedPkg;
+
+        boolean changed = !mLastDisplayedRunningPkgs.equals(newMap.keySet());
+        if (changed) {
+            mLastDisplayedRunningPkgs.clear();
+            mLastDisplayedRunningPkgs.addAll(newMap.keySet());
+        }
+        return changed;
     }
 
-    // 2. Lightweight UI Update: ONLY toggles the blue indicator dot, never recreates views
+    // 2. Lightweight UI Update: updates active capsule highlight & running/focused underline bars cleanly
     private void updateRunningDotsUi() {
         if (appsContainer == null) return;
+        Context context = getContext();
         for (int i = 0; i < appsContainer.getChildCount(); i++) {
             View itemContainer = appsContainer.getChildAt(i);
             if (itemContainer instanceof ViewGroup) {
@@ -204,16 +253,38 @@ public class DeXDockAppsView extends HorizontalScrollView {
                 if (tag instanceof String) {
                     String pkg = (String) tag;
                     boolean isRunning = mRunningTaskMap.containsKey(pkg);
+                    boolean isFocused = pkg.equals(mFocusedTaskPkg);
+                    boolean isVisible = mVisibleTaskPkgs.contains(pkg);
+
+                    View highlight = vg.findViewById(R.id.dex_app_highlight);
+                    if (highlight != null) {
+                        highlight.setVisibility(isFocused ? View.VISIBLE : View.INVISIBLE);
+                    }
+
                     View dot = vg.findViewById(R.id.dex_running_dot);
                     if (dot != null) {
-                        dot.setVisibility(isRunning ? View.VISIBLE : View.GONE);
+                        if (!isRunning) {
+                            dot.setVisibility(View.GONE);
+                        } else {
+                            dot.setVisibility(View.VISIBLE);
+                            ViewGroup.LayoutParams lp = dot.getLayoutParams();
+                            if (lp != null) {
+                                lp.width = dp(context, isFocused ? 16 : (isVisible ? 10 : 6));
+                                lp.height = dp(context, 3);
+                                dot.setLayoutParams(lp);
+                            }
+                            if (dot.getBackground() instanceof GradientDrawable) {
+                                GradientDrawable gd = (GradientDrawable) dot.getBackground();
+                                gd.setColor(isFocused ? Color.parseColor("#0A84FF") : Color.parseColor("#99E1E2E8"));
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    // 3. Full App Dock Reload (Called only on config changes or user pin/unpin)
+    // 3. Full App Dock Reload (Called on config changes, pin/unpin/reorder, or when running unpinned apps change)
     public void reloadApps(Context context) {
         if (appsContainer == null || context == null) return;
         appsContainer.removeAllViews();
@@ -225,10 +296,7 @@ public class DeXDockAppsView extends HorizontalScrollView {
         iconSizePx = Math.min(iconSizePx, maxSafeIconPx);
         int spacingPx = dp(context, ConfigManager.getIconSpacing(context));
 
-        // Pinned packages customization
         List<String> pinnedList = ConfigManager.getPinnedPackages(context);
-
-        // Fallback default initialization if user has never customized pins
         if (pinnedList.isEmpty()) {
             pinnedList = collectDefaultHotSeatPackages(context, pm);
             if (!pinnedList.isEmpty()) {
@@ -237,8 +305,6 @@ public class DeXDockAppsView extends HorizontalScrollView {
         }
 
         List<String> displayList = new ArrayList<>(pinnedList);
-
-        // Append currently running apps that are not pinned
         for (String rPkg : mRunningTaskMap.keySet()) {
             if (!displayList.contains(rPkg) && displayList.size() < 16) {
                 if (pm.getLaunchIntentForPackage(rPkg) != null) {
@@ -247,7 +313,6 @@ public class DeXDockAppsView extends HorizontalScrollView {
             }
         }
 
-        // Render dock items
         for (String pkg : displayList) {
             Drawable iconDrawable = null;
             try {
@@ -257,8 +322,10 @@ public class DeXDockAppsView extends HorizontalScrollView {
 
             boolean isPinned = pinnedList.contains(pkg);
             boolean isRunning = mRunningTaskMap.containsKey(pkg);
+            boolean isFocused = pkg.equals(mFocusedTaskPkg);
+            boolean isVisible = mVisibleTaskPkgs.contains(pkg);
 
-            View appItem = createAppIconView(context, pkg, iconDrawable, iconSizePx, barHeightPx, spacingPx, isPinned, isRunning);
+            View appItem = createAppIconView(context, pkg, iconDrawable, iconSizePx, barHeightPx, spacingPx, isPinned, isRunning, isFocused, isVisible);
             appsContainer.addView(appItem);
         }
     }
@@ -302,7 +369,7 @@ public class DeXDockAppsView extends HorizontalScrollView {
         return defaults;
     }
 
-    private View createAppIconView(Context context, String pkg, Drawable icon, int iconSizePx, int barHeightPx, int spacingPx, boolean isPinned, boolean isRunning) {
+    private View createAppIconView(Context context, String pkg, Drawable icon, int iconSizePx, int barHeightPx, int spacingPx, boolean isPinned, boolean isRunning, boolean isFocused, boolean isVisible) {
         FrameLayout itemContainer = new FrameLayout(context);
         itemContainer.setTag(pkg);
         LinearLayout.LayoutParams containerLp = new LinearLayout.LayoutParams(
@@ -320,6 +387,21 @@ public class DeXDockAppsView extends HorizontalScrollView {
         RippleDrawable ripple = new RippleDrawable(rippleColor, null, mask);
         itemContainer.setBackground(ripple);
 
+        // Subtle Active App Glass Capsule Highlight
+        View activeHighlight = new View(context);
+        activeHighlight.setId(R.id.dex_app_highlight);
+        GradientDrawable hiBg = new GradientDrawable();
+        hiBg.setColor(Color.parseColor("#1FFFFFFF"));
+        hiBg.setCornerRadius(dp(context, 8));
+        activeHighlight.setBackground(hiBg);
+        activeHighlight.setVisibility(isFocused ? View.VISIBLE : View.INVISIBLE);
+        FrameLayout.LayoutParams lpHighlight = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        );
+        lpHighlight.setMargins(dp(context, 2), dp(context, 4), dp(context, 2), dp(context, 4));
+        itemContainer.addView(activeHighlight, lpHighlight);
+
         // App Icon
         ImageView iv = new ImageView(context);
         iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -328,36 +410,37 @@ public class DeXDockAppsView extends HorizontalScrollView {
         lpIcon.gravity = Gravity.CENTER;
         itemContainer.addView(iv, lpIcon);
 
-        // Samsung DeX Active Running Dot
+        // Samsung DeX Active Running Bar / Dot
         View dot = new View(context);
         dot.setId(R.id.dex_running_dot);
         GradientDrawable dotBg = new GradientDrawable();
-        dotBg.setColor(Color.parseColor("#0A84FF"));
-        dotBg.setCornerRadius(dp(context, 2));
+        dotBg.setColor(isFocused ? Color.parseColor("#0A84FF") : Color.parseColor("#99E1E2E8"));
+        dotBg.setCornerRadius(dp(context, 1.5f));
         dot.setBackground(dotBg);
 
-        FrameLayout.LayoutParams lpDot = new FrameLayout.LayoutParams(dp(context, 4), dp(context, 4));
+        FrameLayout.LayoutParams lpDot = new FrameLayout.LayoutParams(
+                dp(context, isFocused ? 16 : (isVisible ? 10 : 6)),
+                dp(context, 3)
+        );
         lpDot.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
         lpDot.bottomMargin = dp(context, 2);
         dot.setVisibility(isRunning ? View.VISIBLE : View.GONE);
         itemContainer.addView(dot, lpDot);
 
-        // Click: Instant 0ms response, fluid toggle
+        // Click: Instant 0ms response, macOS spring bounce + toggle minimize/restore
         itemContainer.setOnClickListener(v -> {
-            // macOS-style tactile feedback bounce
+            v.animate().cancel();
             v.animate()
-                    .scaleX(0.92f)
-                    .scaleY(0.92f)
-                    .setDuration(90)
-                    .withEndAction(() -> {
-                        v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(130).setInterpolator(new OvershootInterpolator(1.4f)).start();
-                    })
+                    .scaleX(0.88f)
+                    .scaleY(0.88f)
+                    .setDuration(85)
+                    .withEndAction(() -> v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(160).setInterpolator(new OvershootInterpolator(1.6f)).start())
                     .start();
 
-            handleAppClickInstant(context, pkg);
+            handleAppClickInstant(context, pkg, v);
         });
 
-        // Long Press: Dynamic Context Menu (Pin / Unpin / Close / App Info)
+        // Long Press: Dynamic Context Menu (Pin / Unpin / Move Left-Right / Close / App Info)
         itemContainer.setOnLongClickListener(v -> {
             showAppContextMenu(context, v, pkg, isPinned);
             return true;
@@ -367,29 +450,31 @@ public class DeXDockAppsView extends HorizontalScrollView {
     }
 
     // 4. Instant 0ms Minimize & Restore Toggle
-    private void handleAppClickInstant(Context context, String pkg) {
+    private void handleAppClickInstant(Context context, String pkg, View anchorView) {
         if (context == null || TextUtils.isEmpty(pkg)) return;
 
-        // Reset dock to bottom whenever an app is interacted with
         LauncherDockHook.resetDockToBottom();
 
         Integer taskId = mRunningTaskMap.get(pkg);
 
         if (taskId != null && taskId > 0) {
-            // If the app is currently focused and in the foreground -> MINIMIZE IT
             if (pkg.equals(mFocusedTaskPkg)) {
-                minimizeTask(context, taskId);
+                minimizeTask(context, taskId, pkg);
             } else {
-                // Minimized or backgrounded -> RESTORE IT INSTANTLY
-                restoreTask(context, taskId, pkg);
+                restoreTask(context, taskId, pkg, anchorView);
             }
         } else {
-            // Not running -> Launch fresh
-            launchAppDirectly(context, pkg);
+            launchAppDirectly(context, pkg, anchorView);
         }
     }
 
-    private void minimizeTask(Context context, int taskId) {
+    private void minimizeTask(Context context, int taskId, String pkg) {
+        mFocusedTaskPkg = null;
+        if (pkg != null) {
+            mVisibleTaskPkgs.remove(pkg);
+        }
+        updateRunningDotsUi();
+
         // 1. Xiaomi native workstation minimize
         try {
             Class<?> wrapperCls = XposedHelpers.findClassIfExists(
@@ -412,23 +497,14 @@ public class DeXDockAppsView extends HorizontalScrollView {
             intent.putExtra("task_id", taskId);
             context.sendBroadcast(intent);
         } catch (Throwable ignored) {}
-
-        mFocusedTaskPkg = null;
     }
 
-    private void restoreTask(Context context, int taskId, String pkg) {
-        // 1. Bring existing task to front
-        try {
-            ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
-            if (am != null) {
-                android.app.ActivityOptions opts = android.app.ActivityOptions.makeBasic();
-                am.moveTaskToFront(taskId, ActivityManager.MOVE_TASK_WITH_HOME, opts.toBundle());
-            }
-        } catch (Throwable t) {
-            XposedBridge.log("[HyperDeX] moveTaskToFront failed: " + t);
-        }
+    private void restoreTask(Context context, int taskId, String pkg, View anchorView) {
+        mFocusedTaskPkg = pkg;
+        mVisibleTaskPkgs.add(pkg);
+        updateRunningDotsUi();
 
-        // 2. Un-hide if eluded by workstation manager
+        // 1. Un-hide if eluded by workstation manager
         try {
             Class<?> wrapperCls = XposedHelpers.findClassIfExists(
                     "com.miui.home.launcher.laptop.LaptopSmallWindowProxyWrapper",
@@ -442,24 +518,57 @@ public class DeXDockAppsView extends HorizontalScrollView {
             }
         } catch (Throwable ignored) {}
 
+        // 2. Bring existing task to front cleanly with smooth scale-up from dock icon (without MOVE_TASK_WITH_HOME)
+        try {
+            ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am != null) {
+                ActivityOptions opts = (anchorView != null)
+                        ? ActivityOptions.makeScaleUpAnimation(anchorView, 0, 0, anchorView.getWidth(), anchorView.getHeight())
+                        : ActivityOptions.makeBasic();
+                am.moveTaskToFront(taskId, ActivityManager.MOVE_TASK_NO_USER_ACTION, opts.toBundle());
+            }
+        } catch (Throwable t) {
+            XposedBridge.log("[HyperDeX] moveTaskToFront failed: " + t);
+        }
+
         LauncherDockHook.resetDockToBottom();
-        mFocusedTaskPkg = pkg;
     }
 
-    private void launchAppDirectly(Context context, String pkg) {
+    private void closeTask(Context context, int taskId, String pkg) {
+        mRunningTaskMap.remove(pkg);
+        mVisibleTaskPkgs.remove(pkg);
+        if (pkg.equals(mFocusedTaskPkg)) {
+            mFocusedTaskPkg = null;
+        }
+        try {
+            Intent intent = new Intent(Constants.ACTION_NAV_TRIGGER);
+            intent.setPackage("com.android.systemui");
+            intent.putExtra(Constants.EXTRA_NAV_ACTION, "close_task");
+            intent.putExtra("task_id", taskId);
+            context.sendBroadcast(intent);
+        } catch (Throwable ignored) {}
+        reloadApps(context);
+    }
+
+    private void launchAppDirectly(Context context, String pkg, View anchorView) {
         try {
             PackageManager pm = context.getPackageManager();
             Intent launchIntent = pm.getLaunchIntentForPackage(pkg);
             if (launchIntent != null) {
                 launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-                context.startActivity(launchIntent);
+                if (anchorView != null) {
+                    ActivityOptions opts = ActivityOptions.makeScaleUpAnimation(anchorView, 0, 0, anchorView.getWidth(), anchorView.getHeight());
+                    context.startActivity(launchIntent, opts.toBundle());
+                } else {
+                    context.startActivity(launchIntent);
+                }
             }
         } catch (Throwable t) {
             XposedBridge.log("[HyperDeX] launchAppDirectly failed: " + t);
         }
     }
 
-    // 5. Desktop-Grade Long-Press Context Menu (Pin / Unpin / Close / Info)
+    // 5. Desktop-Grade Long-Press Context Menu (Pin / Unpin / Move / Close / Info)
     private void showAppContextMenu(Context context, View anchor, String pkg, boolean isPinned) {
         PackageManager pm = context.getPackageManager();
         String appName = pkg;
@@ -511,7 +620,8 @@ public class DeXDockAppsView extends HorizontalScrollView {
         lpDiv.setMargins(0, dp(context, 8), 0, dp(context, 6));
         root.addView(divider, lpDiv);
 
-        final PopupWindow popup = new PopupWindow(root, dp(context, 200), ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        int popupWidth = dp(context, 210);
+        final PopupWindow popup = new PopupWindow(root, popupWidth, ViewGroup.LayoutParams.WRAP_CONTENT, true);
         popup.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         popup.setOutsideTouchable(true);
 
@@ -530,20 +640,41 @@ public class DeXDockAppsView extends HorizontalScrollView {
         });
         root.addView(btnPin);
 
-        // Action 2: Close Window (if running)
+        // Action 2: Reorder Pinned Icons (Move Left / Move Right)
+        if (isPinned) {
+            LinearLayout moveRow = new LinearLayout(context);
+            moveRow.setOrientation(LinearLayout.HORIZONTAL);
+            View btnLeft = createMenuItem(context, "← Move Left", Color.parseColor("#D0D3DC"));
+            btnLeft.setOnClickListener(v -> {
+                popup.dismiss();
+                if (ConfigManager.movePinnedPackage(context, pkg, -1)) {
+                    reloadApps(context);
+                }
+            });
+            View btnRight = createMenuItem(context, "Move Right →", Color.parseColor("#D0D3DC"));
+            btnRight.setOnClickListener(v -> {
+                popup.dismiss();
+                if (ConfigManager.movePinnedPackage(context, pkg, 1)) {
+                    reloadApps(context);
+                }
+            });
+            moveRow.addView(btnLeft, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            moveRow.addView(btnRight, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            root.addView(moveRow);
+        }
+
+        // Action 3: Close Window (if running)
         final Integer taskId = mRunningTaskMap.get(pkg);
         if (taskId != null && taskId > 0) {
             View btnClose = createMenuItem(context, "Close App", Color.parseColor("#FF7675"));
             btnClose.setOnClickListener(v -> {
                 popup.dismiss();
-                minimizeTask(context, taskId);
-                mRunningTaskMap.remove(pkg);
-                updateRunningDotsUi();
+                closeTask(context, taskId, pkg);
             });
             root.addView(btnClose);
         }
 
-        // Action 3: App Info
+        // Action 4: App Info
         View btnInfo = createMenuItem(context, "App Info", Color.parseColor("#A0A2AA"));
         btnInfo.setOnClickListener(v -> {
             popup.dismiss();
@@ -556,10 +687,29 @@ public class DeXDockAppsView extends HorizontalScrollView {
         });
         root.addView(btnInfo);
 
-        // Show popup cleanly above icon
+        // Measure dynamically so popup aligns flush above the taskbar icon
+        root.measure(
+                MeasureSpec.makeMeasureSpec(popupWidth, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
+        );
+        int menuHeight = root.getMeasuredHeight();
+
         int[] location = new int[2];
         anchor.getLocationOnScreen(location);
-        popup.showAtLocation(anchor, Gravity.NO_GRAVITY, location[0], location[1] - dp(context, 130));
+        popup.showAtLocation(anchor, Gravity.NO_GRAVITY, location[0], Math.max(dp(context, 12), location[1] - menuHeight - dp(context, 8)));
+
+        root.setAlpha(0f);
+        root.setScaleX(0.92f);
+        root.setScaleY(0.92f);
+        root.setTranslationY(dp(context, 10));
+        root.animate()
+                .alpha(1f)
+                .scaleX(1f)
+                .scaleY(1f)
+                .translationY(0f)
+                .setDuration(200)
+                .setInterpolator(new PathInterpolator(0.22f, 1.0f, 0.36f, 1.0f))
+                .start();
     }
 
     private View createMenuItem(Context context, String label, int textColor) {

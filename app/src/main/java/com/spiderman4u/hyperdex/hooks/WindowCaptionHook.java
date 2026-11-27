@@ -146,7 +146,31 @@ public class WindowCaptionHook {
         hookMiuiDecorationTouchListener(lpparam);
         hookMiuiCaptionContainerView(lpparam);
         hookAppHeaderViewHolder(lpparam);
+        hookSmoothMinimizeAnimator(lpparam);
         hookStatusBar(lpparam);
+    }
+
+    private static void hookSmoothMinimizeAnimator(XC_LoadPackage.LoadPackageParam lpparam) {
+        try {
+            Class<?> minAnimCls = XposedHelpers.findClassIfExists(
+                    "com.android.wm.shell.shared.animation.MinimizeAnimator",
+                    lpparam.classLoader
+            );
+            if (minAnimCls != null) {
+                XposedBridge.hookAllMethods(minAnimCls, "create", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        Object res = param.getResult();
+                        if (res instanceof android.animation.Animator) {
+                            android.animation.Animator anim = (android.animation.Animator) res;
+                            anim.setDuration(280);
+                            anim.setInterpolator(new android.view.animation.PathInterpolator(0.22f, 1.0f, 0.36f, 1.0f));
+                        }
+                    }
+                });
+                XposedBridge.log(TAG + "MinimizeAnimator hooked for macOS-smooth curve");
+            }
+        } catch (Throwable ignored) {}
     }
 
     /**
@@ -507,7 +531,6 @@ public class WindowCaptionHook {
                     lpparam.classLoader
             );
             if (dotViewCls == null) {
-                XposedBridge.log(TAG + "MiuiDecorationDotView class not found");
                 return;
             }
 
@@ -690,7 +713,6 @@ public class WindowCaptionHook {
                     lpparam.classLoader
             );
             if (touchListenerCls == null) {
-                XposedBridge.log(TAG + "MiuiDecorationTouchListener not found");
                 return;
             }
 
@@ -900,7 +922,6 @@ public class WindowCaptionHook {
             );
 
             if (captionViewCls == null) {
-                XposedBridge.log(TAG + "Class MiuiCaptionContainerView not found");
                 return;
             }
 

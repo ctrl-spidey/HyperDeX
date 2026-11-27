@@ -29,9 +29,9 @@
     <string name="title_actions">System Actions</string>
     <string name="btn_restart_launcher">Apply &amp; Restart Launcher</string>
     <string name="btn_restart_launcher_desc">Safely reloads Launcher and SystemUI to apply all hooks instantly</string>
-    <string name="toast_restarted">HyperDeX v1.1.11 applied • Rebuilt by @spideyHyperOS</string>
+    <string name="toast_restarted">HyperDeX v%1$s applied • Rebuilt by @spideyHyperOS</string>
     <string name="toast_reset_defaults">Taskbar sizing reset to DeX defaults • @spideyHyperOS</string>
-    <string name="footer_credit">HyperDeX v1.1.11 • Rebuilt exclusively for Xiaomi Pad by @spideyHyperOS</string>
+    <string name="footer_credit">HyperDeX v%1$s • Rebuilt exclusively for Xiaomi Pad by @spideyHyperOS</string>
 
     <string name="qs_tile_dex">DeX Mode</string>
     <string name="qs_tile_workstation">Workstation</string>

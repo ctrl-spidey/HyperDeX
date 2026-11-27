@@ -4,16 +4,19 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.PathInterpolator;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
@@ -22,7 +25,14 @@ import android.widget.TextView;
 
 import com.spiderman4u.hyperdex.config.ConfigManager;
 import com.spiderman4u.hyperdex.config.Constants;
+import com.spiderman4u.hyperdex.services.DeXNotificationListener;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -37,36 +47,107 @@ public class DeXNotificationPopup {
         public String title;
         public String text;
         public String time;
+        public String key;
+    }
+
+    public static int getCount() {
+        synchronized (sRecentNotifications) {
+            return sRecentNotifications.size();
+        }
     }
 
     public static void addNotification(String pkg, String title, String text, String time) {
+        addNotification(pkg, title, text, time, null);
+    }
+
+    public static void addNotification(String pkg, String title, String text, String time, String key) {
         if (TextUtils.isEmpty(pkg)) return;
         SimpleNotificationItem item = new SimpleNotificationItem();
         item.packageName = pkg;
         item.title = title != null ? title : "";
         item.text = text != null ? text : "";
         item.time = time != null ? time : "now";
+        item.key = key;
 
         synchronized (sRecentNotifications) {
-            // Remove duplicate if same package and title
             for (int i = sRecentNotifications.size() - 1; i >= 0; i--) {
                 SimpleNotificationItem existing = sRecentNotifications.get(i);
-                if (pkg.equals(existing.packageName) && item.title.equals(existing.title)) {
+                boolean sameKey = key != null && !key.isEmpty() && key.equals(existing.key);
+                boolean sameContent = pkg.equals(existing.packageName) && item.title.equals(existing.title);
+                if (sameKey || sameContent) {
                     sRecentNotifications.remove(i);
                 }
             }
             sRecentNotifications.add(0, item);
-            if (sRecentNotifications.size() > 20) {
+            if (sRecentNotifications.size() > 25) {
                 sRecentNotifications.remove(sRecentNotifications.size() - 1);
             }
         }
     }
 
+    public static void removeNotification(String key, String pkg) {
+        synchronized (sRecentNotifications) {
+            for (int i = sRecentNotifications.size() - 1; i >= 0; i--) {
+                SimpleNotificationItem existing = sRecentNotifications.get(i);
+                if (key != null && !key.isEmpty() && key.equals(existing.key)) {
+                    sRecentNotifications.remove(i);
+                } else if ((key == null || key.isEmpty()) && pkg != null && pkg.equals(existing.packageName)) {
+                    sRecentNotifications.remove(i);
+                }
+            }
+        }
+    }
+
+    public static void clearAll() {
+        synchronized (sRecentNotifications) {
+            sRecentNotifications.clear();
+        }
+    }
+
+    private static void syncFromCacheFileIfEmpty() {
+        synchronized (sRecentNotifications) {
+            if (!sRecentNotifications.isEmpty()) return;
+            try {
+                File file = new File(DeXNotificationListener.NOTIF_FILE_PATH);
+                if (!file.exists() || !file.canRead()) return;
+                StringBuilder sb = new StringBuilder();
+                try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        sb.append(line);
+                    }
+                }
+                JSONArray array = new JSONArray(sb.toString());
+                for (int i = 0; i < array.length(); i++) {
+                    JSONObject obj = array.optJSONObject(i);
+                    if (obj == null) continue;
+                    SimpleNotificationItem item = new SimpleNotificationItem();
+                    item.packageName = obj.optString("pkg", "");
+                    item.title = obj.optString("title", "");
+                    item.text = obj.optString("text", "");
+                    item.time = obj.optString("time", "now");
+                    if (!TextUtils.isEmpty(item.packageName)) {
+                        sRecentNotifications.add(item);
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+    }
+
     public static void show(Context context, View anchorView) {
+        show(context, anchorView, null);
+    }
+
+    public static void show(Context context, View anchorView, DeXSystemTrayView trayView) {
         if (sCurrentPopup != null && sCurrentPopup.isShowing()) {
             sCurrentPopup.dismiss();
             sCurrentPopup = null;
             return;
+        }
+
+        syncFromCacheFileIfEmpty();
+        if (trayView != null) {
+            trayView.updateNotificationBadge(getCount());
         }
 
         int width = dp(context, 360);
@@ -110,7 +191,7 @@ public class DeXNotificationPopup {
         });
         header.addView(btnSettings);
 
-        // Clear Button (Working Clear)
+        // Clear Button
         TextView btnClear = new TextView(context);
         btnClear.setText("Clear");
         btnClear.setTextColor(Color.WHITE);
@@ -126,14 +207,19 @@ public class DeXNotificationPopup {
         listContainer.setOrientation(LinearLayout.VERTICAL);
 
         btnClear.setOnClickListener(v -> {
-            synchronized (sRecentNotifications) {
-                sRecentNotifications.clear();
-            }
+            clearAll();
             try {
-                Intent intent = new Intent(Constants.ACTION_CLEAR_NOTIFICATIONS);
-                intent.setPackage("com.android.systemui");
-                context.sendBroadcast(intent);
+                Intent sysIntent = new Intent(Constants.ACTION_CLEAR_NOTIFICATIONS);
+                sysIntent.setPackage("com.android.systemui");
+                context.sendBroadcast(sysIntent);
+
+                Intent svcIntent = new Intent(Constants.ACTION_CLEAR_NOTIFICATIONS);
+                svcIntent.setPackage(Constants.PACKAGE_NAME);
+                context.sendBroadcast(svcIntent);
             } catch (Throwable ignored) {}
+            if (trayView != null) {
+                trayView.updateNotificationBadge(0);
+            }
             listContainer.removeAllViews();
             populateEmptyState(context, listContainer);
         });
@@ -149,10 +235,9 @@ public class DeXNotificationPopup {
             if (sRecentNotifications.isEmpty()) {
                 populateEmptyState(context, listContainer);
             } else {
-                for (SimpleNotificationItem item : sRecentNotifications) {
-                    View card = createNotificationCard(context, item);
+                for (SimpleNotificationItem item : new ArrayList<>(sRecentNotifications)) {
+                    View card = createNotificationCard(context, item, listContainer, trayView);
                     listContainer.addView(card);
-                    addVerticalSpace(listContainer, context, 8);
                 }
             }
         }
@@ -173,6 +258,20 @@ public class DeXNotificationPopup {
         int yOffset = dp(context, ConfigManager.getTaskbarHeight(context) + 6);
         popup.showAtLocation(anchorView, Gravity.BOTTOM | Gravity.END, xOffset, yOffset);
         sCurrentPopup = popup;
+
+        // Smooth macOS-like popup open animation
+        root.setAlpha(0f);
+        root.setScaleX(0.92f);
+        root.setScaleY(0.92f);
+        root.setTranslationY(dp(context, 14));
+        root.animate()
+                .alpha(1.0f)
+                .scaleX(1.0f)
+                .scaleY(1.0f)
+                .translationY(0f)
+                .setDuration(240)
+                .setInterpolator(new PathInterpolator(0.22f, 1.0f, 0.36f, 1.0f))
+                .start();
     }
 
     private static void populateEmptyState(Context context, LinearLayout listContainer) {
@@ -205,15 +304,20 @@ public class DeXNotificationPopup {
         }
     }
 
-    private static View createNotificationCard(Context context, SimpleNotificationItem item) {
+    private static View createNotificationCard(Context context, SimpleNotificationItem item, LinearLayout listContainer, DeXSystemTrayView trayView) {
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(context, 12), dp(context, 10), dp(context, 12), dp(context, 10));
 
+        LinearLayout.LayoutParams lpCard = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lpCard.bottomMargin = dp(context, 8);
+        card.setLayoutParams(lpCard);
+
         GradientDrawable cardBg = new GradientDrawable();
         cardBg.setColor(Color.parseColor("#262830"));
         cardBg.setCornerRadius(dp(context, 12));
-        card.setBackground(cardBg);
+        RippleDrawable rippleBg = new RippleDrawable(ColorStateList.valueOf(Color.parseColor("#22FFFFFF")), cardBg, null);
+        card.setBackground(rippleBg);
 
         // App Header Row
         LinearLayout appHeader = new LinearLayout(context);
@@ -252,6 +356,41 @@ public class DeXNotificationPopup {
             tvTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
             appHeader.addView(tvTime);
         }
+
+        // Single Notification Dismiss [ × ] button
+        TextView btnDismiss = new TextView(context);
+        btnDismiss.setText("✕");
+        btnDismiss.setTextColor(Color.parseColor("#8A8D98"));
+        btnDismiss.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        btnDismiss.setPadding(dp(context, 8), dp(context, 2), dp(context, 4), dp(context, 2));
+        btnDismiss.setOnClickListener(v -> {
+            synchronized (sRecentNotifications) {
+                sRecentNotifications.remove(item);
+            }
+            if (!TextUtils.isEmpty(item.key)) {
+                try {
+                    Intent dismissIntent = new Intent(Constants.ACTION_DISMISS_NOTIFICATION);
+                    dismissIntent.setPackage("com.android.systemui");
+                    dismissIntent.putExtra("key", item.key);
+                    context.sendBroadcast(dismissIntent);
+                } catch (Throwable ignored) {}
+            }
+            if (trayView != null) {
+                trayView.updateNotificationBadge(getCount());
+            }
+            card.animate()
+                    .alpha(0f)
+                    .translationX(dp(context, 40))
+                    .setDuration(180)
+                    .withEndAction(() -> {
+                        listContainer.removeView(card);
+                        if (listContainer.getChildCount() == 0) {
+                            populateEmptyState(context, listContainer);
+                        }
+                    })
+                    .start();
+        });
+        appHeader.addView(btnDismiss);
 
         card.addView(appHeader);
 

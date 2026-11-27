@@ -31,6 +31,7 @@ public class SystemUIHook {
     private static final String TAG = "[HyperDeX-SystemUI] ";
     private static Context sContext = null;
     private static ClassLoader sClassLoader = null;
+    private static volatile Object sNotificationListener = null;
 
     public static final String ACTION_NAV_TRIGGER = Constants.ACTION_NAV_TRIGGER;
     public static final String EXTRA_NAV_ACTION = Constants.EXTRA_NAV_ACTION;
@@ -127,6 +128,16 @@ public class SystemUIHook {
                 }
             }, clearFilter, Context.RECEIVER_EXPORTED);
 
+            IntentFilter dismissFilter = new IntentFilter(Constants.ACTION_DISMISS_NOTIFICATION);
+            context.registerReceiver(new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context ctx, Intent intent) {
+                    if (intent == null) return;
+                    String key = intent.getStringExtra("key");
+                    dismissSingleNotification(key);
+                }
+            }, dismissFilter, Context.RECEIVER_EXPORTED);
+
             XposedBridge.log(TAG + "SystemUI Nav & Clear Receivers registered successfully");
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Error registering receivers: " + t);
@@ -141,6 +152,9 @@ public class SystemUIHook {
         switch (action) {
             case "minimize_task":
                 WindowCaptionHook.performMinimize(sContext, taskId, null);
+                break;
+            case "close_task":
+                WindowCaptionHook.performClose(sContext, taskId, null);
                 break;
             case "recents":
                 toggleRecents();
@@ -170,22 +184,45 @@ public class SystemUIHook {
     }
 
     private static void hookNotifications(XC_LoadPackage.LoadPackageParam lpparam) {
-        // 1. Hook NotificationListener in SystemUI
-        try {
-            Class<?> notifListenerCls = XposedHelpers.findClassIfExists("com.android.systemui.statusbar.NotificationListener", lpparam.classLoader);
-            if (notifListenerCls != null) {
-                XposedBridge.hookAllMethods(notifListenerCls, "onNotificationPosted", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.args.length > 0 && param.args[0] instanceof StatusBarNotification) {
-                            broadcastNewNotification((StatusBarNotification) param.args[0]);
+        String[] listenerClasses = new String[] {
+            "com.android.systemui.statusbar.notification.MiuiNotificationListener",
+            "com.android.systemui.statusbar.NotificationListener"
+        };
+        for (String clsName : listenerClasses) {
+            try {
+                Class<?> notifListenerCls = XposedHelpers.findClassIfExists(clsName, lpparam.classLoader);
+                if (notifListenerCls != null) {
+                    XposedBridge.hookAllMethods(notifListenerCls, "onListenerConnected", new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                            sNotificationListener = param.thisObject;
+                            syncAllActiveNotifications(param.thisObject);
                         }
-                    }
-                });
-            }
-        } catch (Throwable ignored) {}
+                    });
+                    XposedBridge.hookAllMethods(notifListenerCls, "onNotificationPosted", new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                            sNotificationListener = param.thisObject;
+                            if (param.args.length > 0 && param.args[0] instanceof StatusBarNotification) {
+                                broadcastNewNotification((StatusBarNotification) param.args[0], false);
+                            }
+                        }
+                    });
+                    XposedBridge.hookAllMethods(notifListenerCls, "onNotificationRemoved", new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                            sNotificationListener = param.thisObject;
+                            if (param.args.length > 0 && param.args[0] instanceof StatusBarNotification) {
+                                broadcastRemovedNotification((StatusBarNotification) param.args[0]);
+                            }
+                        }
+                    });
+                    XposedBridge.log(TAG + "Hooked notification listener: " + clsName);
+                }
+            } catch (Throwable ignored) {}
+        }
 
-        // 2. Hook NotificationEntryManager in SystemUI
+        // Fallback: NotificationEntryManager
         try {
             Class<?> nemCls = XposedHelpers.findClassIfExists("com.android.systemui.statusbar.notification.NotificationEntryManager", lpparam.classLoader);
             if (nemCls != null) {
@@ -193,7 +230,7 @@ public class SystemUIHook {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args.length > 0 && param.args[0] instanceof StatusBarNotification) {
-                            broadcastNewNotification((StatusBarNotification) param.args[0]);
+                            broadcastNewNotification((StatusBarNotification) param.args[0], false);
                         }
                     }
                 });
@@ -201,13 +238,28 @@ public class SystemUIHook {
         } catch (Throwable ignored) {}
     }
 
-    private static void broadcastNewNotification(StatusBarNotification sbn) {
+    private static void syncAllActiveNotifications(Object listener) {
+        if (listener == null || sContext == null) return;
+        try {
+            StatusBarNotification[] sbns = (StatusBarNotification[]) XposedHelpers.callMethod(listener, "getActiveNotifications");
+            if (sbns != null) {
+                for (StatusBarNotification sbn : sbns) {
+                    broadcastNewNotification(sbn, true);
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void broadcastNewNotification(StatusBarNotification sbn, boolean syncOnly) {
         if (sbn == null || sContext == null) return;
         try {
             Notification n = sbn.getNotification();
             if (n == null) return;
-            // Ignore ongoing background service notifications
+            // Ignore ongoing background service notifications and group summaries
             if ((n.flags & Notification.FLAG_ONGOING_EVENT) != 0) return;
+            if ((n.flags & Notification.FLAG_FOREGROUND_SERVICE) != 0) return;
+            if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return;
+            if ("android".equals(sbn.getPackageName()) || "com.android.systemui".equals(sbn.getPackageName())) return;
 
             Bundle extras = n.extras;
             CharSequence title = extras != null ? extras.getCharSequence(Notification.EXTRA_TITLE) : null;
@@ -221,14 +273,40 @@ public class SystemUIHook {
             intent.putExtra("text", text != null ? text.toString().trim() : "");
             intent.putExtra("post_time", sbn.getPostTime());
             intent.putExtra("key", sbn.getKey());
+            intent.putExtra("sync_only", syncOnly);
             sContext.sendBroadcast(intent);
-            XposedBridge.log(TAG + "Broadcasted new notification for " + sbn.getPackageName());
         } catch (Throwable t) {
             XposedBridge.log(TAG + "broadcastNewNotification error: " + t);
         }
     }
 
+    private static void broadcastRemovedNotification(StatusBarNotification sbn) {
+        if (sbn == null || sContext == null) return;
+        try {
+            Intent intent = new Intent(Constants.ACTION_REMOVE_NOTIFICATION);
+            intent.setPackage("com.miui.home");
+            intent.putExtra("key", sbn.getKey());
+            intent.putExtra("pkg", sbn.getPackageName());
+            sContext.sendBroadcast(intent);
+        } catch (Throwable ignored) {}
+    }
+
+    private static void dismissSingleNotification(String key) {
+        if (key == null || key.isEmpty()) return;
+        try {
+            if (sNotificationListener != null) {
+                XposedHelpers.callMethod(sNotificationListener, "cancelNotification", key);
+            }
+        } catch (Throwable ignored) {}
+    }
+
     private static void clearAllNotifications() {
+        try {
+            if (sNotificationListener != null) {
+                XposedHelpers.callMethod(sNotificationListener, "cancelAllNotifications");
+            }
+        } catch (Throwable ignored) {}
+
         try {
             if (sContext != null) {
                 NotificationManager nm = (NotificationManager) sContext.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -253,35 +331,35 @@ public class SystemUIHook {
     }
 
     private static void triggerScreenshot() {
-        // 1. Native MIUI / HyperOS screenshot broadcast
-        try {
-            if (sContext != null) {
-                Intent intent = new Intent("com.miui.screenshot.action.SCREENSHOT");
-                intent.setPackage("com.miui.screenshot");
-                sContext.sendBroadcast(intent);
-                return;
-            }
-        } catch (Throwable ignored) {}
-
-        try {
-            if (sContext != null) {
-                Intent intent = new Intent("com.miui.screenshot.ACTION_SCREENSHOT");
-                intent.setPackage("com.miui.screenshot");
-                sContext.sendBroadcast(intent);
-                return;
-            }
-        } catch (Throwable ignored) {}
-
-        // 2. Android native ScreenshotHelper
-        try {
-            if (sContext != null) {
+        // 1. Android 14/15 native ScreenshotHelper (ScreenshotRequest.Builder)
+        if (sContext != null) {
+            try {
                 Class<?> shCls = Class.forName("com.android.internal.util.ScreenshotHelper");
                 Object helper = shCls.getConstructor(Context.class).newInstance(sContext);
-                Method takeScreenshot = shCls.getMethod("takeScreenshot", int.class, Handler.class, Consumer.class);
-                takeScreenshot.invoke(helper, 1, new Handler(Looper.getMainLooper()), null);
-                return;
-            }
-        } catch (Throwable ignored) {}
+                try {
+                    Class<?> reqBuilderCls = Class.forName("com.android.internal.util.ScreenshotRequest$Builder");
+                    Object builder = reqBuilderCls.getConstructor(int.class, int.class).newInstance(1, 0);
+                    Object request = reqBuilderCls.getMethod("build").invoke(builder);
+                    Class<?> reqCls = Class.forName("com.android.internal.util.ScreenshotRequest");
+                    Method takeReq = shCls.getMethod("takeScreenshot", reqCls, Handler.class, Consumer.class);
+                    takeReq.invoke(helper, request, new Handler(Looper.getMainLooper()), null);
+                    return;
+                } catch (Throwable ignored) {
+                    Method takeScreenshot = shCls.getMethod("takeScreenshot", int.class, Handler.class, Consumer.class);
+                    takeScreenshot.invoke(helper, 1, new Handler(Looper.getMainLooper()), null);
+                    return;
+                }
+            } catch (Throwable ignored) {}
+
+            // 2. Native MIUI / HyperOS ScreenShotService (it is a Service, not a BroadcastReceiver!)
+            try {
+                Intent scIntent = new Intent("com.miui.screenshot.action.SCREENSHOT");
+                scIntent.setClassName("com.miui.screenshot", "com.miui.gallery.editor.photo.screen.home.ScreenShotService");
+                if (sContext.startService(scIntent) != null) {
+                    return;
+                }
+            } catch (Throwable ignored) {}
+        }
 
         // 3. Hardware key fallback (KEYCODE_SYSRQ)
         injectKey(KeyEvent.KEYCODE_SYSRQ);
