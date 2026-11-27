@@ -3,7 +3,6 @@ package com.spiderman4u.hyperdex.hooks;
 import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -16,10 +15,8 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.TypedValue;
-import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.ImageButton;
 
@@ -69,6 +66,8 @@ public class WindowCaptionHook {
     private static final Map<View, float[]> sTouchTrackMap = new WeakHashMap<>();
     private static volatile Object sLastActiveDotObj = null;
     private static volatile long sLastActionTimestamp = 0L;
+    private static volatile float sLastTouchRawX = -1f;
+    private static volatile float sLastTouchRawY = -1f;
 
     private static boolean shouldShowWindowsControls(Context context) {
         return context != null
@@ -77,6 +76,7 @@ public class WindowCaptionHook {
     }
 
     public static void init(XC_LoadPackage.LoadPackageParam lpparam) {
+        hookMulWinSwitchEventHandler(lpparam);
         hookMiuiDecorationDot(lpparam);
         hookMiuiDecorationRootViewHost(lpparam);
         hookMiuiDecorationDotView(lpparam);
@@ -84,6 +84,28 @@ public class WindowCaptionHook {
         hookAppHeaderViewHolder(lpparam);
         hookSmoothMinimizeAnimator(lpparam);
         hookStatusBar(lpparam);
+    }
+
+    private static void hookMulWinSwitchEventHandler(XC_LoadPackage.LoadPackageParam lpparam) {
+        try {
+            Class<?> handlerCls = XposedHelpers.findClassIfExists(
+                    "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.MulWinSwitchEventHandler",
+                    lpparam.classLoader
+            );
+            if (handlerCls != null) {
+                XposedBridge.hookAllMethods(handlerCls, "onEvent", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args.length > 0 && param.args[0] instanceof MotionEvent) {
+                            MotionEvent ev = (MotionEvent) param.args[0];
+                            sLastTouchRawX = ev.getRawX();
+                            sLastTouchRawY = ev.getRawY();
+                        }
+                    }
+                });
+                XposedBridge.log(TAG + "MulWinSwitchEventHandler hooked for coordinate tracking");
+            }
+        } catch (Throwable ignored) {}
     }
 
     private static void hookSmoothMinimizeAnimator(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -167,12 +189,15 @@ public class WindowCaptionHook {
             XposedBridge.hookAllMethods(dotCls, "isTouchedInCaption", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (Boolean.TRUE.equals(param.getResult())) return;
                     if (param.args.length == 0 || !(param.args[0] instanceof MotionEvent)) return;
+                    MotionEvent ev = (MotionEvent) param.args[0];
+                    sLastTouchRawX = ev.getRawX();
+                    sLastTouchRawY = ev.getRawY();
+
+                    if (Boolean.TRUE.equals(param.getResult())) return;
                     Context context = getDotContext(param.thisObject);
                     if (!shouldShowWindowsControls(context)) return;
 
-                    MotionEvent ev = (MotionEvent) param.args[0];
                     Rect bounds = getTaskBounds(param.thisObject);
                     int taskW = (bounds != null && bounds.width() > 0) ? bounds.width() : getDisplayBounds(context).width();
                     float halfHitW = dp(context, PILL_WIDTH_DP / 2f + 12);
@@ -181,7 +206,6 @@ public class WindowCaptionHook {
                     float x = ev.getX();
                     float y = ev.getY();
 
-                    // Check both task-relative and screen-relative coordinates
                     boolean inLocal = Math.abs(x - taskW / 2f) <= halfHitW && y >= 0 && y <= maxHitH;
                     boolean inScreen = bounds != null && Math.abs(x - (bounds.left + taskW / 2f)) <= halfHitW
                             && y >= bounds.top - dp(context, 8) && y <= bounds.top + maxHitH;
@@ -189,6 +213,62 @@ public class WindowCaptionHook {
                     if (inLocal || inScreen) {
                         param.setResult(true);
                     }
+                }
+            });
+
+            // Intercept handleCaptionClicked (called by MulWinSwitchDecorViewModel on top pill tap!)
+            XposedBridge.hookAllMethods(dotCls, "handleCaptionClicked", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    Object dotObj = param.thisObject;
+                    Context context = getDotContext(dotObj);
+                    if (!shouldShowWindowsControls(context)) return;
+
+                    long now = SystemClock.uptimeMillis();
+                    if (now - sLastActionTimestamp < 220) {
+                        param.setResult(null);
+                        return;
+                    }
+                    sLastActionTimestamp = now;
+
+                    TaskData data = sDotToTaskDataMap.get(dotObj);
+                    int taskId = (data != null) ? data.taskId : -1;
+                    Rect bounds = getTaskBounds(dotObj);
+                    float pillW = dp(context, PILL_WIDTH_DP);
+                    float centerX;
+                    if (bounds != null && bounds.width() > 0) {
+                        float scale = 1.0f;
+                        try {
+                            float s = XposedHelpers.getFloatField(dotObj, "mScale");
+                            if (s > 0.2f && s <= 1.5f) scale = s;
+                        } catch (Throwable ignored) {}
+                        centerX = bounds.left + (bounds.width() * scale) / 2f;
+                    } else {
+                        centerX = getDisplayBounds(context).width() / 2f;
+                    }
+
+                    float pillLeft = centerX - pillW / 2f;
+                    float ratio = (sLastTouchRawX >= 0f) ? ((sLastTouchRawX - pillLeft) / pillW) : 0.5f;
+                    ratio = Math.max(0f, Math.min(1f, ratio));
+
+                    XposedBridge.log(TAG + "handleCaptionClicked rawX=" + sLastTouchRawX + " pillLeft=" + pillLeft + " ratio=" + ratio + " taskId=" + taskId);
+
+                    View dotView = null;
+                    try {
+                        Object host = XposedHelpers.getObjectField(dotObj, "mMiuiDecorationRootViewHost");
+                        if (host != null) {
+                            dotView = (View) XposedHelpers.callMethod(host, "getRootView");
+                        }
+                    } catch (Throwable ignored) {}
+
+                    if (ratio < 0.34f) {
+                        performMinimize(context, taskId, dotObj);
+                    } else if (ratio < 0.67f) {
+                        performMaximize(context, taskId, dotObj, dotView);
+                    } else {
+                        performClose(context, taskId, dotObj);
+                    }
+                    param.setResult(null); // Suppress Xiaomi 3-dot popup menu
                 }
             });
 
@@ -263,7 +343,7 @@ public class WindowCaptionHook {
         if (dotObj == null) return false;
         try {
             int mode = XposedHelpers.getIntField(dotObj, "mWindowingMode");
-            return mode == 1; // WINDOWING_MODE_FULLSCREEN
+            return mode == 1;
         } catch (Throwable ignored) {}
         try {
             Object taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
@@ -466,7 +546,9 @@ public class WindowCaptionHook {
     }
 
     private static void enforceHostLayoutParams(Object host, Object[] args) {
-        if (args == null) return;
+        if (args == null || host == null) return;
+        // Only resize top dot caption host, never bottom resize pill!
+        if (!host.getClass().getName().contains("MiuiDecorationDotViewHost")) return;
         Context ctx = getHostContext(host);
         if (!shouldShowWindowsControls(ctx)) return;
         for (Object arg : args) {
@@ -558,7 +640,6 @@ public class WindowCaptionHook {
                     float maxCx = barLen / 2f;
                     float sqHalf = dp(context, 4.0f);
                     if (isFs) {
-                        // Restore double-window icon
                         float off = dp(context, 1.5f);
                         canvas.drawRect(maxCx - sqHalf + off, cy - sqHalf - off, maxCx + sqHalf + off, cy + sqHalf - off, iconPaint);
                         canvas.drawRect(maxCx - sqHalf - off, cy - sqHalf + off, maxCx + sqHalf - off, cy + sqHalf + off, iconPaint);
@@ -567,7 +648,7 @@ public class WindowCaptionHook {
                                 dp(context, 1.2f), dp(context, 1.2f), iconPaint);
                     }
 
-                    // C. Close [ ✕ ] (Right Third with soft red accent)
+                    // C. Close [ ✕ ] (Right Third)
                     float closeCx = (barLen * 5f) / 6f;
                     float xHalf = dp(context, 3.8f);
                     Paint closePaint = new Paint(iconPaint);
@@ -633,17 +714,19 @@ public class WindowCaptionHook {
         int action = event.getActionMasked();
         float rawX = event.getRawX();
         float rawY = event.getRawY();
+        sLastTouchRawX = rawX;
+        sLastTouchRawY = rawY;
 
         if (action == MotionEvent.ACTION_DOWN) {
             sTouchTrackMap.put(view, new float[]{rawX, rawY, 0f});
-            return false; // Let Xiaomi initialize drag detector seamlessly
+            return false;
         }
 
         float[] track = sTouchTrackMap.get(view);
         if (action == MotionEvent.ACTION_MOVE) {
             if (track != null && track[2] == 0f) {
                 if (Math.hypot(rawX - track[0], rawY - track[1]) > dp(context, 8)) {
-                    track[2] = 1f; // Marked as drag — allow smooth window movement
+                    track[2] = 1f;
                 }
             }
             return false;
@@ -658,7 +741,7 @@ public class WindowCaptionHook {
 
             long now = SystemClock.uptimeMillis();
             if (now - sLastActionTimestamp < 220) {
-                return true; // Prevent double dispatch from View + TouchListener
+                return true;
             }
             sLastActionTimestamp = now;
 
@@ -673,6 +756,7 @@ public class WindowCaptionHook {
 
             int taskId = (data != null) ? data.taskId : -1;
             Object dotObj = (data != null) ? data.dotInstance : sLastActiveDotObj;
+            XposedBridge.log(TAG + "handlePillTouch UP x=" + touchAlong + "/" + barLen + " ratio=" + ratio + " taskId=" + taskId);
 
             if (ratio < 0.34f) {
                 performMinimize(context, taskId, dotObj);
@@ -720,7 +804,9 @@ public class WindowCaptionHook {
                     XposedHelpers.callMethod(clickListener, "handleCloseClicked", controller);
                     return;
                 }
-            } catch (Throwable ignored) {}
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "handleCloseClicked failed: " + t);
+            }
         }
 
         try {
@@ -787,7 +873,6 @@ public class WindowCaptionHook {
         if (dotInstance == null) return;
         boolean currentlyFullscreen = isTaskFullscreen(dotInstance);
 
-        // 1. Prefer Xiaomi's native fullscreen/freeform switch (smooth Folme animation)
         try {
             Object clickListener = XposedHelpers.getObjectField(dotInstance, "mOnMiuiCaptionClickListener");
             Object controller = XposedHelpers.getObjectField(dotInstance, "mMiuiDecorationController");
@@ -799,9 +884,10 @@ public class WindowCaptionHook {
                 }
                 return;
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "handleFullscreenClicked/Freeform failed: " + t);
+        }
 
-        // 2. WindowContainerTransaction fallback
         try {
             Object taskInfo = XposedHelpers.getObjectField(dotInstance, "mRunningTaskInfo");
             Object taskOrg = XposedHelpers.getObjectField(dotInstance, "mTaskOrganizer");
