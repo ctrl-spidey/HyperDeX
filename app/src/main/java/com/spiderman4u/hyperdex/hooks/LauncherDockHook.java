@@ -44,6 +44,7 @@ public class LauncherDockHook {
     private static final String TAG = "[HyperDeX-Dock] ";
     private static Object sCurrentHotSeatsInstance = null;
     private static Object sCurrentDockContainerInstance = null;
+    private static View sLaptopOverlayRootView = null;
     private static boolean sObserverRegistered = false;
 
     public static void init(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -1053,33 +1054,10 @@ public class LauncherDockHook {
             int bottomOffsetPx = dp(context, ConfigManager.getTaskbarBottomOffset(context));
 
             // Dock Container layout params height, flush bottom inset removal, & WindowManager update
-            ViewGroup.LayoutParams containerLp = dockContainer.getLayoutParams();
-            if (containerLp != null) {
-                containerLp.height = barHeightPx;
-                if (containerLp instanceof android.view.WindowManager.LayoutParams) {
-                    android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) containerLp;
-                    wlp.height = barHeightPx;
-                    wlp.alpha = 1.0f;
-                    wlp.format = android.graphics.PixelFormat.TRANSLUCENT;
-                    wlp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
-                    wlp.y = bottomOffsetPx;
-                    try {
-                        wlp.setFitInsetsTypes(0);
-                    } catch (Throwable ignored) {}
-                    if (bottomOffsetPx < 0) {
-                        wlp.flags |= android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
-                    } else {
-                        wlp.flags &= ~android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
-                    }
-                    android.view.WindowManager wm = (android.view.WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
-                    if (wm != null) {
-                        try {
-                            wm.updateViewLayout(dockContainer, wlp);
-                        } catch (Throwable ignored) {}
-                    }
-                } else {
-                    dockContainer.setLayoutParams(containerLp);
-                }
+            applyWindowParamsIfNeeded(dockContainer, context, barHeightPx, bottomOffsetPx);
+            if (sLaptopOverlayRootView != null && sLaptopOverlayRootView != dockContainer) {
+                sLaptopOverlayRootView.setPadding(0, 0, 0, 0);
+                applyWindowParamsIfNeeded(sLaptopOverlayRootView, context, barHeightPx, bottomOffsetPx);
             }
 
             dockContainer.setBackground(null);
@@ -1251,21 +1229,12 @@ public class LauncherDockHook {
                 dockContainer.animate().cancel();
                 dockContainer.animate().translationY(0f).setDuration(280)
                         .setInterpolator(new android.view.animation.PathInterpolator(0.22f, 1.0f, 0.36f, 1.0f)).start();
-                ViewGroup.LayoutParams lp = dockContainer.getLayoutParams();
-                if (lp instanceof android.view.WindowManager.LayoutParams) {
-                    android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) lp;
-                    wlp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
-                    wlp.y = dp(dockContainer.getContext(), ConfigManager.getTaskbarBottomOffset(dockContainer.getContext()));
-                    try {
-                        wlp.setFitInsetsTypes(0);
-                    } catch (Throwable ignored) {}
-                    android.view.WindowManager wm = (android.view.WindowManager) dockContainer.getContext().getSystemService(Context.WINDOW_SERVICE);
-                    if (wm != null) {
-                        try {
-                            wm.updateViewLayout(dockContainer, wlp);
-                        } catch (Throwable ignored) {}
-                    }
-                }
+                View targetRoot = (sLaptopOverlayRootView != null && sLaptopOverlayRootView.isAttachedToWindow())
+                        ? sLaptopOverlayRootView : dockContainer;
+                Context ctx = targetRoot.getContext();
+                int barHeightPx = dp(ctx, ConfigManager.getTaskbarHeight(ctx));
+                int bottomOffsetPx = dp(ctx, ConfigManager.getTaskbarBottomOffset(ctx));
+                applyWindowParamsIfNeeded(targetRoot, ctx, barHeightPx, bottomOffsetPx);
             } catch (Throwable ignored) {}
         });
     }
@@ -1443,6 +1412,40 @@ public class LauncherDockHook {
         }
     }
 
+    private static void applyWindowParamsIfNeeded(View view, Context context, int barHeightPx, int bottomOffsetPx) {
+        if (view == null || context == null) return;
+        ViewGroup.LayoutParams lp = view.getLayoutParams();
+        if (lp instanceof android.view.WindowManager.LayoutParams) {
+            android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) lp;
+            if (wlp.height > 0 && wlp.height < dp(context, 200)) {
+                wlp.height = barHeightPx;
+            }
+            wlp.alpha = 1.0f;
+            wlp.format = android.graphics.PixelFormat.TRANSLUCENT;
+            wlp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
+            wlp.y = bottomOffsetPx;
+            try {
+                wlp.setFitInsetsTypes(0);
+            } catch (Throwable ignored) {}
+            if (bottomOffsetPx < 0) {
+                wlp.flags |= android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+            } else {
+                wlp.flags &= ~android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+            }
+            android.view.WindowManager wm = (android.view.WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+            if (wm != null && view.isAttachedToWindow()) {
+                try {
+                    wm.updateViewLayout(view, wlp);
+                } catch (Throwable ignored) {}
+            }
+        } else if (lp != null) {
+            if (lp.height != barHeightPx) {
+                lp.height = barHeightPx;
+                view.setLayoutParams(lp);
+            }
+        }
+    }
+
     private static void hookDockWindowManagerParams() {
         try {
             Class<?> wmGlobalCls = Class.forName("android.view.WindowManagerGlobal");
@@ -1451,15 +1454,23 @@ public class LauncherDockHook {
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args.length >= 2 && param.args[0] instanceof View && param.args[1] instanceof android.view.WindowManager.LayoutParams) {
                         View view = (View) param.args[0];
-                        if (view.getClass().getName().contains("laptop.dockbar.DockContainerView")) {
+                        android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) param.args[1];
+                        String title = (wlp.getTitle() != null) ? wlp.getTitle().toString() : "";
+                        boolean isLaptopDock = title.contains("Laptop overlay")
+                                || view.getClass().getName().contains("laptop.dockbar.DockContainerView")
+                                || view.findViewById(R.id.dex_taskbar_view) != null;
+                        if (isLaptopDock) {
+                            sLaptopOverlayRootView = view;
                             Context ctx = view.getContext();
                             if (ConfigManager.shouldApplyDeXTaskbar(ctx)) {
-                                android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) param.args[1];
                                 int targetH = dp(ctx, ConfigManager.getTaskbarHeight(ctx));
                                 int bottomOffsetPx = dp(ctx, ConfigManager.getTaskbarBottomOffset(ctx));
-                                wlp.height = targetH;
+                                if (wlp.height > 0 && wlp.height < dp(ctx, 200)) {
+                                    wlp.height = targetH;
+                                }
                                 wlp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
                                 wlp.y = bottomOffsetPx;
+                                view.setPadding(0, 0, 0, 0);
                                 try {
                                     wlp.setFitInsetsTypes(0);
                                 } catch (Throwable ignored) {}
@@ -1475,7 +1486,7 @@ public class LauncherDockHook {
             };
             XposedBridge.hookAllMethods(wmGlobalCls, "addView", wmParamEnforcer);
             XposedBridge.hookAllMethods(wmGlobalCls, "updateViewLayout", wmParamEnforcer);
-            XposedBridge.log(TAG + "WindowManagerGlobal DockContainerView layout enforcer hooked");
+            XposedBridge.log(TAG + "WindowManagerGlobal DockContainerView/LaptopOverlay enforcer hooked");
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Failed hooking WindowManagerGlobal: " + t);
         }
