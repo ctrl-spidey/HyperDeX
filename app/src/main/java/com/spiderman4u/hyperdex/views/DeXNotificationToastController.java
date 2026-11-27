@@ -146,7 +146,7 @@ public class DeXNotificationToastController {
                         trayView.getLocationOnScreen(trayLoc);
                         int screenH = wm.getCurrentWindowMetrics().getBounds().height();
                         if (trayLoc[1] > 0 && screenH > trayLoc[1]) {
-                            yOffset = Math.max(yOffset, (screenH - trayLoc[1]) + dp(10));
+                            yOffset = Math.max(yOffset, (screenH - trayLoc[1]) + dp(context, 10));
                         }
                     } catch (Throwable ignored) {}
                 }
