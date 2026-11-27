@@ -57,6 +57,7 @@ public class LauncherDockHook {
         hookBackgroundPillClasses(lpparam);
         hookIconContainers(lpparam);
         hookCellBackground(lpparam);
+        hookDockWindowManagerParams();
         hookLauncherAppLaunchAndResume(lpparam);
         hookNormalModeDock(lpparam);
     }
@@ -307,7 +308,7 @@ public class LauncherDockHook {
                 }
             });
 
-            Class<?> defaultImplsCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.laptop.dockbar.DockController$DefaultImpls", lpparam.classLoader);
+            Class<?> defaultImplsCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.dock.DockController$DefaultImpls", lpparam.classLoader);
             if (defaultImplsCls != null) {
                 XposedBridge.hookAllMethods(defaultImplsCls, "updateDockWindowHeight", new XC_MethodHook() {
                     @Override
@@ -379,6 +380,19 @@ public class LauncherDockHook {
                 });
 
                 // Strip bottom system bar insets padding on FitSystemWindowView subclass
+                XposedBridge.hookAllMethods(cls, "setPadding", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View && param.args.length >= 4) {
+                            Context ctx = ((View) param.thisObject).getContext();
+                            if (ConfigManager.shouldApplyDeXTaskbar(ctx)) {
+                                param.args[1] = 0;
+                                param.args[3] = 0;
+                            }
+                        }
+                    }
+                });
+
                 XposedBridge.hookAllMethods(cls, "onApplyWindowInsets", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
@@ -1426,6 +1440,44 @@ public class LauncherDockHook {
             }
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Failed hooking DockWindowManager: " + t);
+        }
+    }
+
+    private static void hookDockWindowManagerParams() {
+        try {
+            Class<?> wmGlobalCls = Class.forName("android.view.WindowManagerGlobal");
+            XC_MethodHook wmParamEnforcer = new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    if (param.args.length >= 2 && param.args[0] instanceof View && param.args[1] instanceof android.view.WindowManager.LayoutParams) {
+                        View view = (View) param.args[0];
+                        if (view.getClass().getName().contains("laptop.dockbar.DockContainerView")) {
+                            Context ctx = view.getContext();
+                            if (ConfigManager.shouldApplyDeXTaskbar(ctx)) {
+                                android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) param.args[1];
+                                int targetH = dp(ctx, ConfigManager.getTaskbarHeight(ctx));
+                                int bottomOffsetPx = dp(ctx, ConfigManager.getTaskbarBottomOffset(ctx));
+                                wlp.height = targetH;
+                                wlp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
+                                wlp.y = bottomOffsetPx;
+                                try {
+                                    wlp.setFitInsetsTypes(0);
+                                } catch (Throwable ignored) {}
+                                if (bottomOffsetPx < 0) {
+                                    wlp.flags |= android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+                                } else {
+                                    wlp.flags &= ~android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+            XposedBridge.hookAllMethods(wmGlobalCls, "addView", wmParamEnforcer);
+            XposedBridge.hookAllMethods(wmGlobalCls, "updateViewLayout", wmParamEnforcer);
+            XposedBridge.log(TAG + "WindowManagerGlobal DockContainerView layout enforcer hooked");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Failed hooking WindowManagerGlobal: " + t);
         }
     }
 
