@@ -96,16 +96,22 @@ public class DeXQuickSettingsPopup {
         row1.setOrientation(LinearLayout.HORIZONTAL);
         row1.setGravity(Gravity.CENTER);
 
-        // 1. Wi-Fi Toggle
+        // 1. Wi-Fi Toggle / Panel
         WifiManager wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         boolean isWifiOn = wifiManager != null && wifiManager.isWifiEnabled();
         View wifiToggle = createTogglePill(context, "Wi-Fi", DeXVectorDrawables.createWifiDrawable(Color.WHITE), isWifiOn, v -> {
+            dismiss();
             try {
-                Intent intent = new Intent(Settings.ACTION_WIFI_SETTINGS);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                context.startActivity(intent);
-                dismiss();
-            } catch (Throwable ignored) {}
+                Intent panelIntent = new Intent(Settings.Panel.ACTION_WIFI);
+                panelIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(panelIntent);
+            } catch (Throwable t) {
+                try {
+                    Intent intent = new Intent(Settings.ACTION_WIFI_SETTINGS);
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(intent);
+                } catch (Throwable ignored) {}
+            }
         });
         row1.addView(wifiToggle, new LinearLayout.LayoutParams(0, dp(context, 54), 1f));
 

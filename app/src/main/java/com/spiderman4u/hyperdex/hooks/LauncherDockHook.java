@@ -1107,7 +1107,8 @@ public class LauncherDockHook {
                 "hyperdex_taskbar_opacity",
                 "hyperdex_show_nav_buttons",
                 "hyperdex_show_search_button",
-                "hyperdex_floating_popups"
+                "hyperdex_floating_popups",
+                "hyperdex_window_controls"
             };
 
             for (String key : settingKeys) {

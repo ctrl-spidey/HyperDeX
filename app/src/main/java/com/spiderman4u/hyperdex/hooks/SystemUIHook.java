@@ -65,6 +65,45 @@ public class SystemUIHook {
     }
 
     private static void hookHeadsUpSuppression(XC_LoadPackage.LoadPackageParam lpparam) {
+        try {
+            Class<?> nispCls = XposedHelpers.findClassIfExists(
+                    "com.android.systemui.statusbar.notification.interruption.NotificationInterruptStateProviderImpl",
+                    lpparam.classLoader
+            );
+            if (nispCls != null) {
+                for (String method : new String[]{"checkHeadsUp", "canAlertHeadsUpCommon", "shouldHeadsUp"}) {
+                    try {
+                        XposedBridge.hookAllMethods(nispCls, method, new XC_MethodHook() {
+                            @Override
+                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                                if (sContext != null && ConfigManager.shouldApplyDeXTaskbar(sContext) && ConfigManager.isFloatingPopupsEnabled(sContext)) {
+                                    param.setResult(false);
+                                }
+                            }
+                        });
+                    } catch (Throwable ignored) {}
+                }
+                XposedBridge.log(TAG + "HeadsUp suppression hooked on NotificationInterruptStateProviderImpl");
+            }
+        } catch (Throwable ignored) {}
+
+        try {
+            Class<?> coordCls = XposedHelpers.findClassIfExists(
+                    "com.android.systemui.statusbar.notification.collection.coordinator.HeadsUpCoordinator",
+                    lpparam.classLoader
+            );
+            if (coordCls != null) {
+                XposedBridge.hookAllMethods(coordCls, "bindForAsyncHeadsUp", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (sContext != null && ConfigManager.shouldApplyDeXTaskbar(sContext) && ConfigManager.isFloatingPopupsEnabled(sContext)) {
+                            param.setResult(null);
+                        }
+                    }
+                });
+            }
+        } catch (Throwable ignored) {}
+
         String[] headsUpClasses = new String[] {
             "com.android.systemui.statusbar.notification.headsup.HeadsUpManagerImpl",
             "com.android.systemui.statusbar.policy.HeadsUpManager",
@@ -74,34 +113,25 @@ public class SystemUIHook {
             try {
                 Class<?> cls = XposedHelpers.findClassIfExists(clsName, lpparam.classLoader);
                 if (cls != null) {
+                    XposedBridge.hookAllMethods(cls, "shouldHeadsUpBecomePinned", new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                            if (sContext != null && ConfigManager.shouldApplyDeXTaskbar(sContext) && ConfigManager.isFloatingPopupsEnabled(sContext)) {
+                                param.setResult(false);
+                            }
+                        }
+                    });
                     XposedBridge.hookAllMethods(cls, "showNotification", new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            if (sContext != null && ConfigManager.shouldApplyDeXTaskbar(sContext)) {
-                                param.setResult(null); // Suppress top heads-up banner in DeX mode!
+                            if (sContext != null && ConfigManager.shouldApplyDeXTaskbar(sContext) && ConfigManager.isFloatingPopupsEnabled(sContext)) {
+                                param.setResult(null);
                             }
                         }
                     });
                 }
             } catch (Throwable ignored) {}
         }
-
-        try {
-            Class<?> nispCls = XposedHelpers.findClassIfExists(
-                    "com.android.systemui.statusbar.notification.interruption.NotificationInterruptStateProviderImpl",
-                    lpparam.classLoader
-            );
-            if (nispCls != null) {
-                XposedBridge.hookAllMethods(nispCls, "shouldHeadsUp", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (sContext != null && ConfigManager.shouldApplyDeXTaskbar(sContext)) {
-                            param.setResult(false);
-                        }
-                    }
-                });
-            }
-        } catch (Throwable ignored) {}
     }
 
     private static void registerReceivers(Context context) {
@@ -152,6 +182,9 @@ public class SystemUIHook {
         switch (action) {
             case "minimize_task":
                 WindowCaptionHook.performMinimize(sContext, taskId, null);
+                break;
+            case "minimize_all":
+                WindowCaptionHook.performMinimizeAll(sContext);
                 break;
             case "close_task":
                 WindowCaptionHook.performClose(sContext, taskId, null);

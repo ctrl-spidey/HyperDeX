@@ -18,6 +18,7 @@ public class ConfigManager {
     private static final String SETTING_SHOW_NAV_BUTTONS = "hyperdex_show_nav_buttons";
     private static final String SETTING_SHOW_SEARCH_BUTTON = "hyperdex_show_search_button";
     private static final String SETTING_FLOATING_POPUPS = "hyperdex_floating_popups";
+    private static final String SETTING_WINDOW_CONTROLS = "hyperdex_window_controls";
     private static final String SETTING_TASKBAR_HEIGHT = "hyperdex_taskbar_height";
     private static final String SETTING_ICON_SIZE = "hyperdex_icon_size";
     private static final String SETTING_ICON_SPACING = "hyperdex_icon_spacing";
@@ -33,7 +34,7 @@ public class ConfigManager {
     }
 
     public static boolean isClassicWindowControlsEnabled(Context context) {
-        return false;
+        return getGlobalBoolean(context, SETTING_WINDOW_CONTROLS, true);
     }
 
     public static boolean isShowNavButtons(Context context) {
@@ -176,6 +177,7 @@ public class ConfigManager {
         setBoolean(context, Constants.PREF_SHOW_NAV_BUTTONS, true);
         setBoolean(context, Constants.PREF_SHOW_SEARCH_BUTTON, true);
         setBoolean(context, Constants.PREF_FLOATING_POPUPS, true);
+        setBoolean(context, Constants.PREF_WINDOW_CONTROLS, true);
         try {
             Settings.Global.putString(context.getContentResolver(), SETTING_PINNED_PACKAGES, "");
         } catch (Throwable ignored) {}
@@ -195,6 +197,7 @@ public class ConfigManager {
         if (Constants.PREF_SHOW_NAV_BUTTONS.equals(prefKey)) return SETTING_SHOW_NAV_BUTTONS;
         if (Constants.PREF_SHOW_SEARCH_BUTTON.equals(prefKey)) return SETTING_SHOW_SEARCH_BUTTON;
         if (Constants.PREF_FLOATING_POPUPS.equals(prefKey)) return SETTING_FLOATING_POPUPS;
+        if (Constants.PREF_WINDOW_CONTROLS.equals(prefKey)) return SETTING_WINDOW_CONTROLS;
         if (Constants.PREF_TASKBAR_HEIGHT.equals(prefKey)) return SETTING_TASKBAR_HEIGHT;
         if (Constants.PREF_ICON_SIZE.equals(prefKey)) return SETTING_ICON_SIZE;
         if (Constants.PREF_ICON_SPACING.equals(prefKey)) return SETTING_ICON_SPACING;

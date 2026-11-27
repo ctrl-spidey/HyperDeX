@@ -18,6 +18,8 @@
     <string name="opt_search_button_desc">Display dedicated Search [ Q ] shortcut next to navigation controls</string>
     <string name="opt_floating_popups">Floating Popups &amp; Tray Toasts</string>
     <string name="opt_floating_popups_desc">Show compact Samsung DeX Quick Settings &amp; immersive notification ingestion toasts</string>
+    <string name="opt_window_controls">Windows Titlebar Controls</string>
+    <string name="opt_window_controls_desc">Replace Xiaomi 3-dot window handle with desktop Minimize, Maximize, and Close buttons</string>
 
     <string name="title_dimensions">Dimensions &amp; Spacing</string>
     <string name="opt_taskbar_height">Taskbar Height</string>

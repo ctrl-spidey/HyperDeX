@@ -16,6 +16,7 @@ public final class Constants {
     public static final String PREF_SHOW_NAV_BUTTONS = "pref_show_nav_buttons";
     public static final String PREF_SHOW_SEARCH_BUTTON = "pref_show_search_button";
     public static final String PREF_FLOATING_POPUPS = "pref_floating_popups";
+    public static final String PREF_WINDOW_CONTROLS = "pref_window_controls";
     public static final String PREF_TASKBAR_HEIGHT = "pref_taskbar_height";
     public static final String PREF_ICON_SIZE = "pref_icon_size";
     public static final String PREF_ICON_SPACING = "pref_icon_spacing";
@@ -47,5 +48,5 @@ public final class Constants {
 
     // Developer Branding
     public static final String DEVELOPER_TAG = "@spideyHyperOS";
-    public static final String APP_VERSION_NAME = "1.1.14";
+    public static final String APP_VERSION_NAME = "1.1.15";
 }

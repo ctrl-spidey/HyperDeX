@@ -139,7 +139,17 @@ public class DeXNotificationToastController {
                 int barHeight = ConfigManager.getTaskbarHeight(context);
                 int cardWidth = dp(context, 290);
                 int xOffset = dp(context, 14);
-                int yOffset = dp(context, barHeight + 10);
+                int yOffset = dp(context, barHeight + 14);
+                if (trayView != null && trayView.isAttachedToWindow() && wm != null) {
+                    try {
+                        int[] trayLoc = new int[2];
+                        trayView.getLocationOnScreen(trayLoc);
+                        int screenH = wm.getCurrentWindowMetrics().getBounds().height();
+                        if (trayLoc[1] > 0 && screenH > trayLoc[1]) {
+                            yOffset = Math.max(yOffset, (screenH - trayLoc[1]) + dp(10));
+                        }
+                    } catch (Throwable ignored) {}
+                }
 
                 boolean addedOverlay = false;
                 if (wm != null) {

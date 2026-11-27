@@ -3,20 +3,17 @@ package com.spiderman4u.hyperdex.hooks;
 import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
-import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.content.res.Configuration;
 import android.database.ContentObserver;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
-import android.graphics.Typeface;
-import android.graphics.drawable.Drawable;
-import android.graphics.drawable.GradientDrawable;
+import android.graphics.RectF;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -25,10 +22,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.ImageButton;
-import android.widget.LinearLayout;
-import android.widget.TextView;
 
-import com.spiderman4u.hyperdex.R;
 import com.spiderman4u.hyperdex.config.ConfigManager;
 
 import java.lang.ref.WeakReference;
@@ -48,6 +42,9 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class WindowCaptionHook {
 
     private static final String TAG = "[HyperDeX-Caption] ";
+    private static final int PILL_WIDTH_DP = 120;
+    private static final int PILL_HEIGHT_DP = 24;
+
     private static final List<WeakReference<View>> sStatusBarViews = new ArrayList<>();
     private static boolean sStatusBarObserverRegistered = false;
 
@@ -55,15 +52,13 @@ public class WindowCaptionHook {
         final int taskId;
         final String appName;
         final Object dotInstance;
-        volatile float scale;
-        volatile int lastKnownWidth;
+        volatile boolean isFullscreen;
 
-        TaskData(int taskId, String appName, Object dotInstance, float scale, int lastKnownWidth) {
+        TaskData(int taskId, String appName, Object dotInstance, boolean isFullscreen) {
             this.taskId = taskId;
             this.appName = appName;
             this.dotInstance = dotInstance;
-            this.scale = scale;
-            this.lastKnownWidth = lastKnownWidth;
+            this.isFullscreen = isFullscreen;
         }
     }
 
@@ -71,72 +66,14 @@ public class WindowCaptionHook {
     private static final Map<Object, Object> sHostToDotMap = new WeakHashMap<>();
     private static final Map<Object, TaskData> sDotToTaskDataMap = new WeakHashMap<>();
     private static final Map<Object, Object> sTouchListenerToDotMap = new WeakHashMap<>();
+    private static final Map<View, float[]> sTouchTrackMap = new WeakHashMap<>();
     private static volatile Object sLastActiveDotObj = null;
+    private static volatile long sLastActionTimestamp = 0L;
 
-    private static float[] calculateVisibleBounds(View view, Object dotObj, int barLength, Context context) {
-        TaskData data = (view != null) ? sTaskDataMap.get(view) : null;
-        if (dotObj == null && data != null) {
-            dotObj = data.dotInstance;
-        }
-        if (dotObj == null) {
-            dotObj = sLastActiveDotObj;
-        }
-
-        Rect taskBounds = getTaskBounds(dotObj);
-        int winWidth = (taskBounds != null && taskBounds.width() > 0) ? taskBounds.width() : 0;
-        if (winWidth <= 0 && data != null && data.lastKnownWidth > 0) {
-            winWidth = data.lastKnownWidth;
-        }
-
-        float scale = getWindowScale(view, dotObj);
-        float visibleWidth;
-        if (winWidth > 0) {
-            visibleWidth = (float) Math.min(winWidth, barLength);
-        } else if (scale > 0.1f && scale < 0.99f) {
-            visibleWidth = barLength * scale;
-        } else {
-            visibleWidth = (float) barLength;
-        }
-
-        if (visibleWidth > barLength) {
-            visibleWidth = barLength;
-        }
-
-        if (data != null && (int) visibleWidth > 0) {
-            data.lastKnownWidth = (int) visibleWidth;
-        }
-
-        float visibleLeft = (barLength - visibleWidth) / 2f;
-        float visibleRight = visibleLeft + visibleWidth;
-        return new float[]{visibleLeft, visibleRight};
-    }
-
-    private static float getWindowScale(View view, Object dotObj) {
-        if (dotObj != null) {
-            try {
-                float s = XposedHelpers.getFloatField(dotObj, "mScale");
-                if (s > 0.1f && s <= 1.0f) return s;
-            } catch (Throwable ignored) {}
-        }
-        if (view != null) {
-            TaskData data = sTaskDataMap.get(view);
-            if (data != null) {
-                if (data.dotInstance != null) {
-                    try {
-                        float s = XposedHelpers.getFloatField(data.dotInstance, "mScale");
-                        if (s > 0.1f && s <= 1.0f) return s;
-                    } catch (Throwable ignored) {}
-                }
-                if (data.scale > 0.1f && data.scale <= 1.0f) return data.scale;
-            }
-        }
-        if (sLastActiveDotObj != null) {
-            try {
-                float s = XposedHelpers.getFloatField(sLastActiveDotObj, "mScale");
-                if (s > 0.1f && s <= 1.0f) return s;
-            } catch (Throwable ignored) {}
-        }
-        return 1.0f;
+    private static boolean shouldShowWindowsControls(Context context) {
+        return context != null
+                && ConfigManager.shouldApplyDeXTaskbar(context)
+                && ConfigManager.isClassicWindowControlsEnabled(context);
     }
 
     public static void init(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -144,7 +81,6 @@ public class WindowCaptionHook {
         hookMiuiDecorationRootViewHost(lpparam);
         hookMiuiDecorationDotView(lpparam);
         hookMiuiDecorationTouchListener(lpparam);
-        hookMiuiCaptionContainerView(lpparam);
         hookAppHeaderViewHolder(lpparam);
         hookSmoothMinimizeAnimator(lpparam);
         hookStatusBar(lpparam);
@@ -173,96 +109,122 @@ public class WindowCaptionHook {
         } catch (Throwable ignored) {}
     }
 
-    /**
-     * Hook MiuiDecorationDot to capture TaskInfo, TaskBounds, and surface layout
-     */
     private static void hookMiuiDecorationDot(XC_LoadPackage.LoadPackageParam lpparam) {
         try {
             Class<?> dotCls = XposedHelpers.findClassIfExists(
                     "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationDot",
                     lpparam.classLoader
             );
-            if (dotCls != null) {
-                // 1. Constructors: link dot and host immediately
-                XposedBridge.hookAllConstructors(dotCls, new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        linkDotAndHost(param.thisObject, param.args);
-                    }
-                });
+            if (dotCls == null) return;
 
-                // 2. relayout: link TaskInfo and ViewHost BEFORE and AFTER
-                XposedBridge.hookAllMethods(dotCls, "relayout", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        linkDotAndHost(param.thisObject, param.args);
-                    }
+            XposedBridge.hookAllConstructors(dotCls, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    linkDotAndHost(param.thisObject, param.args);
+                }
+            });
 
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        linkDotAndHost(param.thisObject, param.args);
-                    }
-                });
-
-                // 3. updateViews: ensure host mapping and layout params
-                XposedBridge.hookAllMethods(dotCls, "updateViews", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        linkDotAndHost(param.thisObject, null);
-                    }
-
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        linkDotAndHost(param.thisObject, null);
-                        applySurfacePositionAndCrop(param.thisObject, null);
-                    }
-                });
-
-                // 4. updateTopCaptionSurface: position at (0, 0) and crop to full task bounds width
-                XposedBridge.hookAllMethods(dotCls, "updateTopCaptionSurface", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        applySurfacePositionAndCrop(param.thisObject, param.args);
-                    }
-
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        applySurfacePositionAndCrop(param.thisObject, param.args);
-                    }
-                });
-
-                // 5. Suppress scale animation during window drag to keep titlebar buttons persistent
-                try {
-                    Class<?> scaleAnimCls = XposedHelpers.findClassIfExists(
-                            "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationDotScaleAnim",
-                            lpparam.classLoader
-                    );
-                    if (scaleAnimCls != null) {
-                        XposedBridge.hookAllMethods(scaleAnimCls, "startMenuAnimation", new XC_MethodHook() {
-                            @Override
-                            protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                                Context context = null;
-                                try {
-                                    Object dot = XposedHelpers.getObjectField(param.thisObject, "mDecorationDot");
-                                    if (dot != null) {
-                                        context = (Context) XposedHelpers.getObjectField(dot, "mContext");
-                                    }
-                                } catch (Throwable ignored) {}
-                                if (ConfigManager.isClassicWindowControlsEnabled(context)) {
-                                    param.setResult(null); // Keep caption surface full-sized during window drag!
-                                }
-                            }
-                        });
-                        XposedBridge.log(TAG + "MiuiDecorationDotScaleAnim hooked successfully");
-                    }
-                } catch (Throwable tAnim) {
-                    XposedBridge.log(TAG + "Failed hooking MiuiDecorationDotScaleAnim: " + tAnim);
+            XposedBridge.hookAllMethods(dotCls, "relayout", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    linkDotAndHost(param.thisObject, param.args);
                 }
 
-                XposedBridge.log(TAG + "MiuiDecorationDot hooked successfully");
-            }
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    linkDotAndHost(param.thisObject, param.args);
+                    enforcePillRelayoutResult(param.thisObject);
+                }
+            });
+
+            XposedBridge.hookAllMethods(dotCls, "updateRootView", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    enforcePillRelayoutResult(param.thisObject);
+                }
+            });
+
+            XposedBridge.hookAllMethods(dotCls, "updateViews", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                    linkDotAndHost(param.thisObject, null);
+                    enforcePillRelayoutResult(param.thisObject);
+                }
+
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    applySurfacePositionAndCrop(param.thisObject, null);
+                }
+            });
+
+            XposedBridge.hookAllMethods(dotCls, "updateTopCaptionSurface", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    applySurfacePositionAndCrop(param.thisObject, param.args);
+                }
+            });
+
+            XposedBridge.hookAllMethods(dotCls, "isTouchedInCaption", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    if (Boolean.TRUE.equals(param.getResult())) return;
+                    if (param.args.length == 0 || !(param.args[0] instanceof MotionEvent)) return;
+                    Context context = getDotContext(param.thisObject);
+                    if (!shouldShowWindowsControls(context)) return;
+
+                    MotionEvent ev = (MotionEvent) param.args[0];
+                    Rect bounds = getTaskBounds(param.thisObject);
+                    int taskW = (bounds != null && bounds.width() > 0) ? bounds.width() : getDisplayBounds(context).width();
+                    float halfHitW = dp(context, PILL_WIDTH_DP / 2f + 12);
+                    float maxHitH = dp(context, PILL_HEIGHT_DP + 16);
+
+                    float x = ev.getX();
+                    float y = ev.getY();
+
+                    // Check both task-relative and screen-relative coordinates
+                    boolean inLocal = Math.abs(x - taskW / 2f) <= halfHitW && y >= 0 && y <= maxHitH;
+                    boolean inScreen = bounds != null && Math.abs(x - (bounds.left + taskW / 2f)) <= halfHitW
+                            && y >= bounds.top - dp(context, 8) && y <= bounds.top + maxHitH;
+
+                    if (inLocal || inScreen) {
+                        param.setResult(true);
+                    }
+                }
+            });
+
+            // Keep scale fixed while dragging/hovering when Windows controls are active
+            try {
+                Class<?> scaleAnimCls = XposedHelpers.findClassIfExists(
+                        "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationDotScaleAnim",
+                        lpparam.classLoader
+                );
+                if (scaleAnimCls != null) {
+                    XposedBridge.hookAllMethods(scaleAnimCls, "startMenuAnimation", new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                            try {
+                                Object dot = XposedHelpers.getObjectField(param.thisObject, "mDecorationDot");
+                                if (dot != null && shouldShowWindowsControls(getDotContext(dot))) {
+                                    param.setResult(null);
+                                }
+                            } catch (Throwable ignored) {}
+                        }
+                    });
+                }
+            } catch (Throwable ignored) {}
+
+            XposedBridge.log(TAG + "MiuiDecorationDot hooked for Windows controls");
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Failed hooking MiuiDecorationDot: " + t);
+        }
+    }
+
+    private static Context getDotContext(Object dotObj) {
+        if (dotObj == null) return null;
+        try {
+            return (Context) XposedHelpers.getObjectField(dotObj, "mContext");
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 
@@ -289,15 +251,104 @@ public class WindowCaptionHook {
         return bounds;
     }
 
-    private static int getWindowWidth(Object dotObj, Context context) {
+    private static int getTaskWidth(Object dotObj, Context context) {
         Rect bounds = getTaskBounds(dotObj);
-        int winWidth = (bounds != null) ? Math.max(bounds.width(), bounds.height()) : 0;
-        if (winWidth <= 0 && context != null) {
-            try {
-                winWidth = context.getResources().getDisplayMetrics().widthPixels;
-            } catch (Throwable ignored) {}
+        if (bounds != null && bounds.width() > 0) {
+            return bounds.width();
         }
-        return winWidth;
+        return getDisplayBounds(context).width();
+    }
+
+    private static boolean isTaskFullscreen(Object dotObj) {
+        if (dotObj == null) return false;
+        try {
+            int mode = XposedHelpers.getIntField(dotObj, "mWindowingMode");
+            return mode == 1; // WINDOWING_MODE_FULLSCREEN
+        } catch (Throwable ignored) {}
+        try {
+            Object taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
+            if (taskInfo != null) {
+                Object cfg = XposedHelpers.getObjectField(taskInfo, "configuration");
+                if (cfg != null) {
+                    Object winCfg = XposedHelpers.getObjectField(cfg, "windowConfiguration");
+                    if (winCfg != null) {
+                        int mode = (int) XposedHelpers.callMethod(winCfg, "getWindowingMode");
+                        return mode == 1;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    private static void enforcePillRelayoutResult(Object dotObj) {
+        Context context = getDotContext(dotObj);
+        if (!shouldShowWindowsControls(context)) return;
+
+        int pillW = dp(context, PILL_WIDTH_DP);
+        int pillH = dp(context, PILL_HEIGHT_DP);
+        int taskW = getTaskWidth(dotObj, context);
+        int capX = Math.max(0, (taskW - pillW) / 2);
+        int capY = dp(context, 4);
+
+        try {
+            Object result = XposedHelpers.getObjectField(dotObj, "mResult");
+            if (result != null) {
+                XposedHelpers.setFloatField(result, "mCaptionWidth", (float) pillW);
+                XposedHelpers.setFloatField(result, "mCaptionHeight", (float) pillH);
+                XposedHelpers.setIntField(result, "mCaptionX", capX);
+                XposedHelpers.setIntField(result, "mCaptionY", capY);
+            }
+        } catch (Throwable ignored) {}
+
+        try {
+            WindowManager.LayoutParams lp = (WindowManager.LayoutParams) XposedHelpers.getObjectField(dotObj, "mDecorationLayoutParams");
+            if (lp != null) {
+                lp.width = pillW;
+                lp.height = pillH;
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void applySurfacePositionAndCrop(Object dotObj, Object[] args) {
+        Context context = getDotContext(dotObj);
+        if (!shouldShowWindowsControls(context)) return;
+
+        Object surface = null;
+        try {
+            surface = XposedHelpers.getObjectField(dotObj, "mCaptionContainerSurface");
+        } catch (Throwable ignored) {}
+        if (surface == null) return;
+
+        Object t = null;
+        Rect surfaceBounds = null;
+        float scale = 1.0f;
+        if (args != null) {
+            for (Object arg : args) {
+                if (arg == null) continue;
+                if (arg.getClass().getName().contains("Transaction")) t = arg;
+                else if (arg instanceof Rect) surfaceBounds = (Rect) arg;
+            }
+            if (args.length >= 3 && args[2] instanceof Float) {
+                float s = (Float) args[2];
+                if (s > 0.1f && s <= 2.0f) scale = s;
+            }
+        }
+        if (t == null) return;
+
+        int pillW = dp(context, PILL_WIDTH_DP);
+        int pillH = dp(context, PILL_HEIGHT_DP);
+        int taskW = (surfaceBounds != null && surfaceBounds.width() > 0)
+                ? surfaceBounds.width()
+                : getTaskWidth(dotObj, context);
+
+        try {
+            float posX = Math.max(0f, (taskW - pillW * scale) / 2f);
+            float posY = dp(context, 4) * scale;
+            XposedHelpers.callMethod(t, "setWindowCrop", surface, pillW, pillH);
+            XposedHelpers.callMethod(t, "setPosition", surface, posX, posY);
+            XposedHelpers.callMethod(t, "show", surface);
+        } catch (Throwable ignored) {}
     }
 
     private static void linkDotAndHost(Object dotObj, Object[] args) {
@@ -311,12 +362,7 @@ public class WindowCaptionHook {
         try {
             taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
         } catch (Throwable ignored) {}
-        if (taskInfo == null) {
-            try {
-                taskInfo = XposedHelpers.getObjectField(dotObj, "mTaskInfo");
-            } catch (Throwable ignored) {}
-        }
-        if (taskInfo == null && args != null && args.length > 0) {
+        if (taskInfo == null && args != null) {
             for (Object arg : args) {
                 if (arg != null && arg.getClass().getName().contains("TaskInfo")) {
                     taskInfo = arg;
@@ -337,95 +383,33 @@ public class WindowCaptionHook {
             } catch (Throwable ignored) {}
         }
 
-        float scale = 1.0f;
-        try {
-            scale = XposedHelpers.getFloatField(dotObj, "mScale");
-        } catch (Throwable ignored) {}
-        if (scale <= 0.1f || scale > 1.0f) scale = 1.0f;
-
-        TaskData taskData = new TaskData(taskId, appName, dotObj, scale, 0);
+        TaskData taskData = new TaskData(taskId, appName, dotObj, isTaskFullscreen(dotObj));
         sDotToTaskDataMap.put(dotObj, taskData);
 
-        // Associate host with dot controller
         try {
             Object host = XposedHelpers.getObjectField(dotObj, "mMiuiDecorationRootViewHost");
             if (host != null) {
                 sHostToDotMap.put(host, dotObj);
-                try {
-                    View dotView = (View) XposedHelpers.callMethod(host, "getRootView");
-                    if (dotView != null) {
-                        sTaskDataMap.put(dotView, taskData);
-                        dotView.postInvalidate();
-                    }
-                } catch (Throwable ignored) {}
+                View dotView = (View) XposedHelpers.callMethod(host, "getRootView");
+                if (dotView != null) {
+                    sTaskDataMap.put(dotView, taskData);
+                    dotView.postInvalidate();
+                }
             }
         } catch (Throwable ignored) {}
 
-        // Associate touch listener
         try {
             Object touchListener = XposedHelpers.getObjectField(dotObj, "mOnCaptionTouchListener");
             if (touchListener != null) {
                 sTouchListenerToDotMap.put(touchListener, dotObj);
             }
         } catch (Throwable ignored) {}
-
-        // Secondary discovery of DotView
-        for (Field f : dotObj.getClass().getDeclaredFields()) {
-            try {
-                f.setAccessible(true);
-                Object v = f.get(dotObj);
-                if (v instanceof View && v.getClass().getName().contains("MiuiDecorationDotView")) {
-                    sTaskDataMap.put((View) v, taskData);
-                    ((View) v).postInvalidate();
-                    break;
-                }
-            } catch (Throwable ignored) {}
-        }
     }
 
-    private static void applySurfacePositionAndCrop(Object dotObj, Object[] args) {
-        if (dotObj == null) return;
-        Context context = null;
-        try {
-            context = (Context) XposedHelpers.getObjectField(dotObj, "mContext");
-        } catch (Throwable ignored) {}
-
-        if (context == null || !ConfigManager.isClassicWindowControlsEnabled(context)) {
-            return;
-        }
-
-        Object surface = null;
-        try {
-            surface = XposedHelpers.getObjectField(dotObj, "mCaptionContainerSurface");
-        } catch (Throwable ignored) {}
-
-        int winWidth = getWindowWidth(dotObj, context);
-        int barHeight = dp(context, 32);
-
-        Object t = null;
-        if (args != null && args.length > 0 && args[0] != null) {
-            String name = args[0].getClass().getName();
-            if (name.contains("Transaction")) {
-                t = args[0];
-            }
-        }
-
-        if (t != null && surface != null && winWidth > 0) {
-            try {
-                XposedHelpers.callMethod(t, "setPosition", surface, 0f, 0f);
-                XposedHelpers.callMethod(t, "setWindowCrop", surface, winWidth, barHeight);
-                XposedHelpers.callMethod(t, "show", surface);
-            } catch (Throwable ignored) {}
-        }
-    }
-
-    /**
-     * Hook MiuiDecorationDotViewHost to report full window width and titlebar height
-     */
     private static void hookMiuiDecorationRootViewHost(XC_LoadPackage.LoadPackageParam lpparam) {
         String[] hostClasses = new String[] {
                 "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationDotViewHost",
-                // abstract
+                "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationRootViewHost"
         };
 
         for (String className : hostClasses) {
@@ -433,108 +417,76 @@ public class WindowCaptionHook {
                 Class<?> cls = XposedHelpers.findClassIfExists(className, lpparam.classLoader);
                 if (cls == null) continue;
 
-                // getSurfaceWidth: return full window width instead of narrow pill width
-                XposedBridge.hookAllMethods(cls, "getSurfaceWidth", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        Object host = param.thisObject;
-                        Object dotObj = sHostToDotMap.get(host);
-                        if (dotObj == null) dotObj = sLastActiveDotObj;
-
-                        if (dotObj != null) {
-                            try {
-                                Context context = (Context) XposedHelpers.getObjectField(dotObj, "mContext");
-                                if (ConfigManager.isClassicWindowControlsEnabled(context)) {
-                                    int winWidth = getWindowWidth(dotObj, context);
-                                    if (winWidth > 0) {
-                                        param.setResult((float) winWidth);
-                                    }
-                                }
-                            } catch (Throwable ignored) {}
+                if (className.endsWith("MiuiDecorationDotViewHost")) {
+                    XposedBridge.hookAllMethods(cls, "getSurfaceWidth", new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                            Context ctx = getHostContext(param.thisObject);
+                            if (shouldShowWindowsControls(ctx)) {
+                                param.setResult((float) dp(ctx, PILL_WIDTH_DP));
+                            }
                         }
-                    }
-                });
+                    });
 
-                // getSurfaceHeight: return DeX titlebar height (32dp)
-                XposedBridge.hookAllMethods(cls, "getSurfaceHeight", new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        Object host = param.thisObject;
-                        Object dotObj = sHostToDotMap.get(host);
-                        if (dotObj == null) dotObj = sLastActiveDotObj;
-
-                        if (dotObj != null) {
-                            try {
-                                Context context = (Context) XposedHelpers.getObjectField(dotObj, "mContext");
-                                if (ConfigManager.isClassicWindowControlsEnabled(context)) {
-                                    param.setResult((float) dp(context, 32));
-                                }
-                            } catch (Throwable ignored) {}
+                    XposedBridge.hookAllMethods(cls, "getSurfaceHeight", new XC_MethodHook() {
+                        @Override
+                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                            Context ctx = getHostContext(param.thisObject);
+                            if (shouldShowWindowsControls(ctx)) {
+                                param.setResult((float) dp(ctx, PILL_HEIGHT_DP));
+                            }
                         }
-                    }
-                });
+                    });
+                }
 
-                // Enforce LayoutParams in createOrRelayoutView and relayoutView
                 XposedBridge.hookAllMethods(cls, "createOrRelayoutView", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        enforceFullCaptionParams(param.thisObject, param.args);
+                        enforceHostLayoutParams(param.thisObject, param.args);
                     }
                 });
 
                 XposedBridge.hookAllMethods(cls, "relayoutView", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        enforceFullCaptionParams(param.thisObject, param.args);
+                        enforceHostLayoutParams(param.thisObject, param.args);
                     }
                 });
-
-                XposedBridge.log(TAG + "Host class hooked: " + className);
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + "Failed hooking host class " + className + ": " + t);
-            }
+            } catch (Throwable ignored) {}
         }
     }
 
-    private static void enforceFullCaptionParams(Object host, Object[] args) {
-        if (args == null || args.length == 0) return;
+    private static Context getHostContext(Object host) {
+        if (host == null) return null;
+        try {
+            return (Context) XposedHelpers.getObjectField(host, "mContext");
+        } catch (Throwable ignored) {}
+        Object dotObj = sHostToDotMap.get(host);
+        return getDotContext(dotObj != null ? dotObj : sLastActiveDotObj);
+    }
+
+    private static void enforceHostLayoutParams(Object host, Object[] args) {
+        if (args == null) return;
+        Context ctx = getHostContext(host);
+        if (!shouldShowWindowsControls(ctx)) return;
         for (Object arg : args) {
             if (arg instanceof WindowManager.LayoutParams) {
                 WindowManager.LayoutParams lp = (WindowManager.LayoutParams) arg;
-                Object dotObj = sHostToDotMap.get(host);
-                if (dotObj == null) dotObj = sLastActiveDotObj;
-                if (dotObj != null) {
-                    try {
-                        Context context = (Context) XposedHelpers.getObjectField(dotObj, "mContext");
-                        if (ConfigManager.isClassicWindowControlsEnabled(context)) {
-                            int winWidth = getWindowWidth(dotObj, context);
-                            if (winWidth > 0) {
-                                lp.width = winWidth;
-                                lp.height = dp(context, 32);
-                                lp.gravity = Gravity.TOP | Gravity.START;
-                            }
-                        }
-                    } catch (Throwable ignored) {}
-                }
+                lp.width = dp(ctx, PILL_WIDTH_DP);
+                lp.height = dp(ctx, PILL_HEIGHT_DP);
                 break;
             }
         }
     }
 
-    /**
-     * Hook MiuiDecorationDotView to persistently render DeX classic window titlebar controls [-] [□] [X]
-     */
     private static void hookMiuiDecorationDotView(XC_LoadPackage.LoadPackageParam lpparam) {
         try {
             Class<?> dotViewCls = XposedHelpers.findClassIfExists(
                     "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationDotView",
                     lpparam.classLoader
             );
-            if (dotViewCls == null) {
-                return;
-            }
+            if (dotViewCls == null) return;
 
-            // 1. onDraw: persistently paint Samsung DeX window titlebar and buttons [-] [□] [X]
             XposedBridge.hookAllMethods(dotViewCls, "onDraw", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -543,7 +495,7 @@ public class WindowCaptionHook {
                     }
                     View view = (View) param.thisObject;
                     Context context = view.getContext();
-                    if (!ConfigManager.isClassicWindowControlsEnabled(context)) {
+                    if (!shouldShowWindowsControls(context)) {
                         return;
                     }
 
@@ -553,14 +505,11 @@ public class WindowCaptionHook {
                     if (rawW <= 0 || rawH <= 0) return;
 
                     boolean isRotated = rawW < rawH;
-                    int barLength = isRotated ? rawH : rawW;
-                    int barThickness = isRotated ? rawW : rawH;
+                    float barLen = isRotated ? rawH : rawW;
+                    float barThick = isRotated ? rawW : rawH;
 
                     TaskData data = sTaskDataMap.get(view);
-                    Object dotObj = (data != null) ? data.dotInstance : sLastActiveDotObj;
-                    float[] bounds = calculateVisibleBounds(view, dotObj, barLength, context);
-                    float visibleLeft = bounds[0];
-                    float visibleRight = bounds[1];
+                    boolean isFs = data != null && data.isFullscreen;
 
                     canvas.save();
                     if (isRotated) {
@@ -568,89 +517,69 @@ public class WindowCaptionHook {
                         canvas.rotate(-90f);
                     }
 
-                    float cy = barThickness / 2f;
+                    float radius = barThick / 2f;
+                    RectF pillRect = new RectF(1f, 1f, barLen - 1f, barThick - 1f);
 
-                    // A. Dark sleek acrylic background header
-                    Paint bgPaint = new Paint();
-                    bgPaint.setColor(Color.parseColor("#DE141518"));
+                    // 1. Sleek Acrylic Windows Control Pill
+                    Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    bgPaint.setColor(Color.parseColor("#E316181E"));
                     bgPaint.setStyle(Paint.Style.FILL);
-                    bgPaint.setAntiAlias(true);
-                    canvas.drawRect(visibleLeft, 0, visibleRight, barThickness, bgPaint);
+                    canvas.drawRoundRect(pillRect, radius, radius, bgPaint);
 
-                    // B. Crisp 1px bottom accent border
-                    Paint strokePaint = new Paint();
-                    strokePaint.setColor(Color.parseColor("#33FFFFFF"));
-                    strokePaint.setStrokeWidth(1f);
-                    canvas.drawLine(visibleLeft, barThickness - 1, visibleRight, barThickness - 1, strokePaint);
+                    // 2. Subtle hairline border
+                    Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    borderPaint.setColor(Color.parseColor("#47FFFFFF"));
+                    borderPaint.setStyle(Paint.Style.STROKE);
+                    borderPaint.setStrokeWidth(dp(context, 0.8f));
+                    canvas.drawRoundRect(pillRect, radius, radius, borderPaint);
 
-                    // C. App Icon & Title on left
-                    int textLeft = (int) (visibleLeft + dp(context, 14));
-                    if (data != null && data.appName != null && !data.appName.isEmpty()) {
-                        try {
-                            PackageManager pm = context.getPackageManager();
-                            ApplicationInfo appInfo = pm.getApplicationInfo(data.appName, 0);
-                            Drawable icon = pm.getApplicationIcon(appInfo);
-                            if (icon != null) {
-                                int iconSize = dp(context, 16);
-                                int iconTop = (int) (cy - iconSize / 2f);
-                                int iconLeft = (int) (visibleLeft + dp(context, 12));
-                                icon.setBounds(iconLeft, iconTop, iconLeft + iconSize, iconTop + iconSize);
-                                icon.draw(canvas);
-                                textLeft = (int) (visibleLeft + dp(context, 34));
-                            }
-                            CharSequence label = pm.getApplicationLabel(appInfo);
-                            if (label != null && label.length() > 0) {
-                                Paint textPaint = new Paint();
-                                textPaint.setColor(Color.WHITE);
-                                textPaint.setTextSize(dp(context, 12));
-                                textPaint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-                                textPaint.setAntiAlias(true);
-                                canvas.drawText(label.toString(), textLeft, cy + dp(context, 4), textPaint);
-                            }
-                        } catch (Throwable ignored) {}
+                    // 3. Subtle section dividers
+                    Paint divPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    divPaint.setColor(Color.parseColor("#24FFFFFF"));
+                    divPaint.setStrokeWidth(1f);
+                    float divPadY = barThick * 0.28f;
+                    canvas.drawLine(barLen / 3f, divPadY, barLen / 3f, barThick - divPadY, divPaint);
+                    canvas.drawLine((barLen * 2f) / 3f, divPadY, (barLen * 2f) / 3f, barThick - divPadY, divPaint);
+
+                    float cy = barThick / 2f;
+                    Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    iconPaint.setColor(Color.parseColor("#EAECEF"));
+                    iconPaint.setStyle(Paint.Style.STROKE);
+                    iconPaint.setStrokeWidth(dp(context, 1.5f));
+                    iconPaint.setStrokeCap(Paint.Cap.ROUND);
+                    iconPaint.setStrokeJoin(Paint.Join.ROUND);
+
+                    // A. Minimize [ ─ ] (Left Third)
+                    float minCx = barLen / 6f;
+                    float minHalf = dp(context, 4.8f);
+                    canvas.drawLine(minCx - minHalf, cy, minCx + minHalf, cy, iconPaint);
+
+                    // B. Maximize / Restore [ ▢ ] (Middle Third)
+                    float maxCx = barLen / 2f;
+                    float sqHalf = dp(context, 4.0f);
+                    if (isFs) {
+                        // Restore double-window icon
+                        float off = dp(context, 1.5f);
+                        canvas.drawRect(maxCx - sqHalf + off, cy - sqHalf - off, maxCx + sqHalf + off, cy + sqHalf - off, iconPaint);
+                        canvas.drawRect(maxCx - sqHalf - off, cy - sqHalf + off, maxCx + sqHalf - off, cy + sqHalf + off, iconPaint);
+                    } else {
+                        canvas.drawRoundRect(new RectF(maxCx - sqHalf, cy - sqHalf, maxCx + sqHalf, cy + sqHalf),
+                                dp(context, 1.2f), dp(context, 1.2f), iconPaint);
                     }
 
-                    // D. Subtle center drag handle pill
-                    Paint pillPaint = new Paint();
-                    pillPaint.setColor(Color.parseColor("#55FFFFFF"));
-                    pillPaint.setStyle(Paint.Style.FILL);
-                    pillPaint.setAntiAlias(true);
-                    float centerCx = (visibleLeft + visibleRight) / 2f;
-                    canvas.drawRoundRect(centerCx - dp(context, 18), cy - dp(context, 2), centerCx + dp(context, 18), cy + dp(context, 2), dp(context, 2), dp(context, 2), pillPaint);
-
-                    // E. Classic Samsung DeX Titlebar Buttons [-] [□] [X]
-                    Paint btnPaint = new Paint();
-                    btnPaint.setColor(Color.parseColor("#E1E2E8"));
-                    btnPaint.setStyle(Paint.Style.STROKE);
-                    btnPaint.setStrokeWidth(dp(context, 1.8f));
-                    btnPaint.setAntiAlias(true);
-                    btnPaint.setStrokeCap(Paint.Cap.ROUND);
-                    btnPaint.setStrokeJoin(Paint.Join.ROUND);
-
-                    // 1. [-] Minimize button: center at visibleRight - 100dp
-                    float minCx = visibleRight - dp(context, 100);
-                    float minHalfW = dp(context, 5.5f);
-                    canvas.drawLine(minCx - minHalfW, cy, minCx + minHalfW, cy, btnPaint);
-
-                    // 2. [□] Maximize button: center at visibleRight - 65dp
-                    float maxCx = visibleRight - dp(context, 65);
-                    float maxHalfSize = dp(context, 5f);
-                    canvas.drawRect(maxCx - maxHalfSize, cy - maxHalfSize, maxCx + maxHalfSize, cy + maxHalfSize, btnPaint);
-
-                    // 3. [X] Close button: center at visibleRight - 28dp
-                    float closeCx = visibleRight - dp(context, 28);
-                    float closeHalfSize = dp(context, 4.5f);
-                    canvas.drawLine(closeCx - closeHalfSize, cy - closeHalfSize, closeCx + closeHalfSize, cy + closeHalfSize, btnPaint);
-                    canvas.drawLine(closeCx + closeHalfSize, cy - closeHalfSize, closeCx - closeHalfSize, cy + closeHalfSize, btnPaint);
+                    // C. Close [ ✕ ] (Right Third with soft red accent)
+                    float closeCx = (barLen * 5f) / 6f;
+                    float xHalf = dp(context, 3.8f);
+                    Paint closePaint = new Paint(iconPaint);
+                    closePaint.setColor(Color.parseColor("#FF7675"));
+                    canvas.drawLine(closeCx - xHalf, cy - xHalf, closeCx + xHalf, cy + xHalf, closePaint);
+                    canvas.drawLine(closeCx + xHalf, cy - xHalf, closeCx - xHalf, cy + xHalf, closePaint);
 
                     canvas.restore();
-
-                    // Suppress Xiaomi native onDraw (which draws the 3 white dots)
                     param.setResult(null);
                 }
             });
 
-            // 2. dispatchTouchEvent on View as safety net
             XposedBridge.hookAllMethods(dotViewCls, "dispatchTouchEvent", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
@@ -658,63 +587,23 @@ public class WindowCaptionHook {
                         return;
                     }
                     View view = (View) param.thisObject;
-                    Context context = view.getContext();
-                    if (!ConfigManager.isClassicWindowControlsEnabled(context)) {
-                        return;
-                    }
+                    if (!shouldShowWindowsControls(view.getContext())) return;
 
-                    MotionEvent event = (MotionEvent) param.args[0];
-                    int rawW = view.getWidth();
-                    int rawH = view.getHeight();
-                    boolean isRotated = rawW < rawH;
-                    int barLength = isRotated ? rawH : rawW;
-                    int barThickness = isRotated ? rawW : rawH;
-
-                    float touchPosAlongBar = isRotated ? (rawH - event.getY()) : event.getX();
-                    float touchPosAcrossBar = isRotated ? event.getX() : event.getY();
-
-                    TaskData data = sTaskDataMap.get(view);
-                    int taskId = (data != null) ? data.taskId : -1;
-                    Object dotObj = (data != null) ? data.dotInstance : sLastActiveDotObj;
-
-                    float[] bounds = calculateVisibleBounds(view, dotObj, barLength, context);
-                    float visibleLeft = bounds[0];
-                    float visibleRight = bounds[1];
-
-                    float minBtnX = visibleRight - dp(context, 120);
-                    if (touchPosAlongBar >= minBtnX && touchPosAlongBar <= visibleRight && touchPosAcrossBar >= 0 && touchPosAcrossBar <= barThickness) {
-                        if (event.getAction() == MotionEvent.ACTION_UP) {
-                            if (touchPosAlongBar >= visibleRight - dp(context, 46)) {
-                                performClose(context, taskId, dotObj);
-                            } else if (touchPosAlongBar >= visibleRight - dp(context, 82)) {
-                                performMaximize(context, taskId, dotObj);
-                            } else {
-                                performMinimize(context, taskId, dotObj);
-                            }
-                        }
+                    if (handlePillTouch(view, (MotionEvent) param.args[0], sTaskDataMap.get(view))) {
                         param.setResult(true);
                     }
                 }
             });
-
-            XposedBridge.log(TAG + "MiuiDecorationDotView hooked with persistent DeX titlebar controls");
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "Failed hooking MiuiDecorationDotView: " + t);
-        }
+        } catch (Throwable ignored) {}
     }
 
-    /**
-     * Hook MiuiDecorationTouchListener to intercept touch on DeX buttons [-] [□] [X] while preserving window dragging
-     */
     private static void hookMiuiDecorationTouchListener(XC_LoadPackage.LoadPackageParam lpparam) {
         try {
             Class<?> touchListenerCls = XposedHelpers.findClassIfExists(
                     "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.decoration.MiuiDecorationTouchListener",
                     lpparam.classLoader
             );
-            if (touchListenerCls == null) {
-                return;
-            }
+            if (touchListenerCls == null) return;
 
             XposedBridge.hookAllMethods(touchListenerCls, "onTouch", new XC_MethodHook() {
                 @Override
@@ -723,57 +612,82 @@ public class WindowCaptionHook {
                         return;
                     }
                     View view = (View) param.args[0];
-                    MotionEvent event = (MotionEvent) param.args[1];
-                    Context context = view.getContext();
-                    if (!ConfigManager.isClassicWindowControlsEnabled(context)) return;
+                    if (!shouldShowWindowsControls(view.getContext())) return;
 
-                    int rawW = view.getWidth();
-                    int rawH = view.getHeight();
-                    boolean isRotated = rawW < rawH;
-                    int barLength = isRotated ? rawH : rawW;
-                    int barThickness = isRotated ? rawW : rawH;
-
-                    float touchPosAlongBar = isRotated ? (rawH - event.getY()) : event.getX();
-                    float touchPosAcrossBar = isRotated ? event.getX() : event.getY();
-
-                    int taskId = -1;
-                    try {
-                        taskId = XposedHelpers.getIntField(param.thisObject, "mTaskId");
-                    } catch (Throwable ignored) {}
-                    if (taskId <= 0) {
-                        TaskData data = sTaskDataMap.get(view);
-                        if (data != null) taskId = data.taskId;
+                    TaskData data = sTaskDataMap.get(view);
+                    if (data == null) {
+                        Object dotObj = sTouchListenerToDotMap.get(param.thisObject);
+                        if (dotObj != null) data = sDotToTaskDataMap.get(dotObj);
                     }
 
-                    Object dotObj = sTouchListenerToDotMap.get(param.thisObject);
-                    if (dotObj == null) dotObj = sLastActiveDotObj;
-
-                    float[] bounds = calculateVisibleBounds(view, dotObj, barLength, context);
-                    float visibleLeft = bounds[0];
-                    float visibleRight = bounds[1];
-
-                    // If touching the right-side button cluster [-] [□] [X]
-                    float minBtnX = visibleRight - dp(context, 120);
-                    if (touchPosAlongBar >= minBtnX && touchPosAlongBar <= visibleRight && touchPosAcrossBar >= 0 && touchPosAcrossBar <= barThickness) {
-                        if (event.getAction() == MotionEvent.ACTION_UP) {
-                            if (touchPosAlongBar >= visibleRight - dp(context, 46)) {
-                                performClose(context, taskId, dotObj);
-                            } else if (touchPosAlongBar >= visibleRight - dp(context, 82)) {
-                                performMaximize(context, taskId, dotObj);
-                            } else {
-                                performMinimize(context, taskId, dotObj);
-                            }
-                        }
-                        param.setResult(true); // Consume touch so dragging isn't triggered
+                    if (handlePillTouch(view, (MotionEvent) param.args[1], data)) {
+                        param.setResult(true);
                     }
-                    // Else: allow default onTouch to execute normally (smooth window dragging!)
                 }
             });
+        } catch (Throwable ignored) {}
+    }
 
-            XposedBridge.log(TAG + "MiuiDecorationTouchListener hooked successfully");
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "Failed hooking MiuiDecorationTouchListener: " + t);
+    private static boolean handlePillTouch(View view, MotionEvent event, TaskData data) {
+        Context context = view.getContext();
+        int action = event.getActionMasked();
+        float rawX = event.getRawX();
+        float rawY = event.getRawY();
+
+        if (action == MotionEvent.ACTION_DOWN) {
+            sTouchTrackMap.put(view, new float[]{rawX, rawY, 0f});
+            return false; // Let Xiaomi initialize drag detector seamlessly
         }
+
+        float[] track = sTouchTrackMap.get(view);
+        if (action == MotionEvent.ACTION_MOVE) {
+            if (track != null && track[2] == 0f) {
+                if (Math.hypot(rawX - track[0], rawY - track[1]) > dp(context, 8)) {
+                    track[2] = 1f; // Marked as drag — allow smooth window movement
+                }
+            }
+            return false;
+        }
+
+        if (action == MotionEvent.ACTION_UP) {
+            boolean wasDrag = track != null && track[2] > 0.5f;
+            sTouchTrackMap.remove(view);
+            if (wasDrag) {
+                return false;
+            }
+
+            long now = SystemClock.uptimeMillis();
+            if (now - sLastActionTimestamp < 220) {
+                return true; // Prevent double dispatch from View + TouchListener
+            }
+            sLastActionTimestamp = now;
+
+            int rawW = view.getWidth();
+            int rawH = view.getHeight();
+            if (rawW <= 0 || rawH <= 0) return false;
+
+            boolean isRotated = rawW < rawH;
+            float barLen = isRotated ? rawH : rawW;
+            float touchAlong = isRotated ? (rawH - event.getY()) : event.getX();
+            float ratio = touchAlong / barLen;
+
+            int taskId = (data != null) ? data.taskId : -1;
+            Object dotObj = (data != null) ? data.dotInstance : sLastActiveDotObj;
+
+            if (ratio < 0.34f) {
+                performMinimize(context, taskId, dotObj);
+            } else if (ratio < 0.67f) {
+                performMaximize(context, taskId, dotObj, view);
+            } else {
+                performClose(context, taskId, dotObj);
+            }
+            return true;
+        }
+
+        if (action == MotionEvent.ACTION_CANCEL) {
+            sTouchTrackMap.remove(view);
+        }
+        return false;
     }
 
     private static final Map<Integer, Rect> sSavedWindowBounds = new java.util.concurrent.ConcurrentHashMap<>();
@@ -802,7 +716,7 @@ public class WindowCaptionHook {
             try {
                 Object clickListener = XposedHelpers.getObjectField(dotInstance, "mOnMiuiCaptionClickListener");
                 Object controller = XposedHelpers.getObjectField(dotInstance, "mMiuiDecorationController");
-                if (clickListener != null) {
+                if (clickListener != null && controller != null) {
                     XposedHelpers.callMethod(clickListener, "handleCloseClicked", controller);
                     return;
                 }
@@ -812,24 +726,12 @@ public class WindowCaptionHook {
         try {
             if (taskId > 0) {
                 Class<?> atmCls = Class.forName("android.app.ActivityTaskManager");
-                Method getService = atmCls.getMethod("getService");
-                Object atm = getService.invoke(null);
-                Method removeTask = atm.getClass().getMethod("removeTask", int.class);
-                removeTask.invoke(atm, taskId);
+                Object atm = atmCls.getMethod("getService").invoke(null);
+                atm.getClass().getMethod("removeTask", int.class).invoke(atm, taskId);
                 return;
             }
         } catch (Throwable t) {
             XposedBridge.log(TAG + "removeTask via ATM failed: " + t);
-        }
-
-        if (dotInstance != null) {
-            try {
-                Method m = XposedHelpers.findMethodBestMatch(dotInstance.getClass(), "close");
-                if (m != null) {
-                    m.invoke(dotInstance);
-                    return;
-                }
-            } catch (Throwable ignored) {}
         }
     }
 
@@ -851,25 +753,55 @@ public class WindowCaptionHook {
             }
         }
 
-        // Secondary fallback via ATM moveTaskToRootTask or moveTaskToBack
         try {
             if (taskId > 0) {
                 Class<?> atmCls = Class.forName("android.app.ActivityTaskManager");
-                Method getService = atmCls.getMethod("getService");
-                Object atm = getService.invoke(null);
+                Object atm = atmCls.getMethod("getService").invoke(null);
                 try {
                     Method moveTaskToRootTask = atm.getClass().getMethod("moveTaskToRootTask", int.class, int.class, boolean.class);
                     moveTaskToRootTask.invoke(atm, taskId, -1, false);
-                    return;
                 } catch (Throwable ignored) {}
             }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "performMinimize via ATM failed: " + t);
-        }
+        } catch (Throwable ignored) {}
     }
 
-    public static void performMaximize(Context context, int taskId, Object dotInstance) {
+    public static void performMinimizeAll(Context context) {
+        try {
+            Class<?> atmCls = Class.forName("android.app.ActivityTaskManager");
+            Object atm = atmCls.getMethod("getService").invoke(null);
+            List<?> tasks = (List<?>) XposedHelpers.callMethod(atm, "getTasks", 20, false, false, 0);
+            if (tasks == null) return;
+            for (Object task : tasks) {
+                try {
+                    boolean isVisible = XposedHelpers.getBooleanField(task, "isVisible");
+                    int topType = XposedHelpers.getIntField(task, "topActivityType");
+                    if (!isVisible || topType > 1) continue;
+                    int tid = XposedHelpers.getIntField(task, "taskId");
+                    performMinimize(context, tid, null);
+                } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    public static void performMaximize(Context context, int taskId, Object dotInstance, View captionView) {
         if (dotInstance == null) return;
+        boolean currentlyFullscreen = isTaskFullscreen(dotInstance);
+
+        // 1. Prefer Xiaomi's native fullscreen/freeform switch (smooth Folme animation)
+        try {
+            Object clickListener = XposedHelpers.getObjectField(dotInstance, "mOnMiuiCaptionClickListener");
+            Object controller = XposedHelpers.getObjectField(dotInstance, "mMiuiDecorationController");
+            if (clickListener != null && controller != null) {
+                if (currentlyFullscreen) {
+                    XposedHelpers.callMethod(clickListener, "handleFreeformClicked", captionView, controller);
+                } else {
+                    XposedHelpers.callMethod(clickListener, "handleFullscreenClicked", controller);
+                }
+                return;
+            }
+        } catch (Throwable ignored) {}
+
+        // 2. WindowContainerTransaction fallback
         try {
             Object taskInfo = XposedHelpers.getObjectField(dotInstance, "mRunningTaskInfo");
             Object taskOrg = XposedHelpers.getObjectField(dotInstance, "mTaskOrganizer");
@@ -884,12 +816,11 @@ public class WindowCaptionHook {
             int barHeight = dp(context, ConfigManager.getTaskbarHeight(context));
             Rect desktopMaxBounds = new Rect(0, 0, displayBounds.width(), displayBounds.height() - barHeight);
 
-            boolean isAlreadyMaximized = (currentBounds != null &&
+            boolean isAlreadyMaximized = currentlyFullscreen || (currentBounds != null &&
                     Math.abs(currentBounds.width() - desktopMaxBounds.width()) <= dp(context, 20) &&
                     Math.abs(currentBounds.height() - desktopMaxBounds.height()) <= dp(context, 40));
 
             if (isAlreadyMaximized) {
-                // Restore to saved bounds
                 Rect restoreBounds = (taskId > 0) ? sSavedWindowBounds.get(taskId) : null;
                 if (restoreBounds == null) {
                     int w = (int) (displayBounds.width() * 0.7f);
@@ -900,93 +831,14 @@ public class WindowCaptionHook {
                 }
                 XposedHelpers.callMethod(wct, "setBounds", token, restoreBounds);
             } else {
-                // Save current bounds for restore
                 if (currentBounds != null && currentBounds.width() > 0 && taskId > 0) {
                     sSavedWindowBounds.put(taskId, new Rect(currentBounds));
                 }
-                // Maximize to full desktop work area (above taskbar)
                 XposedHelpers.callMethod(wct, "setBounds", token, desktopMaxBounds);
             }
-
             XposedHelpers.callMethod(taskOrg, "applyTransaction", wct);
         } catch (Throwable t) {
             XposedBridge.log(TAG + "performMaximize failed: " + t);
-        }
-    }
-
-    private static void hookMiuiCaptionContainerView(XC_LoadPackage.LoadPackageParam lpparam) {
-        try {
-            Class<?> captionViewCls = XposedHelpers.findClassIfExists(
-                    "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.handlemenu.MiuiCaptionContainerView",
-                    lpparam.classLoader
-            );
-
-            if (captionViewCls == null) {
-                return;
-            }
-
-            XposedBridge.hookAllMethods(captionViewCls, "initButtonAndBg", new XC_MethodHook() {
-                @Override
-                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    if (!(param.thisObject instanceof View)) return;
-                    View captionView = (View) param.thisObject;
-                    Context context = captionView.getContext();
-
-                    if (!ConfigManager.isClassicWindowControlsEnabled(context)) {
-                        return;
-                    }
-
-                    // 1. Dark sleek PC titlebar background
-                    GradientDrawable bg = new GradientDrawable();
-                    bg.setColor(Color.parseColor("#DE18191C"));
-                    bg.setCornerRadii(new float[]{14, 14, 14, 14, 0, 0, 0, 0});
-                    captionView.setBackground(bg);
-
-                    // 2. Add App Title text on the left if not present
-                    if (captionView instanceof ViewGroup) {
-                        ViewGroup group = (ViewGroup) captionView;
-                        View existingTitle = group.findViewById(R.id.dex_window_title);
-                        if (existingTitle == null) {
-                            try {
-                                CharSequence appName = (CharSequence) XposedHelpers.getObjectField(param.thisObject, "mAppName");
-                                if (appName != null && appName.length() > 0) {
-                                    TextView tvTitle = new TextView(context);
-                                    tvTitle.setId(R.id.dex_window_title);
-                                    tvTitle.setText(appName);
-                                    tvTitle.setTextColor(Color.WHITE);
-                                    tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-                                    tvTitle.setTypeface(null, Typeface.BOLD);
-                                    tvTitle.setPadding(dp(context, 12), 0, 0, 0);
-
-                                    LinearLayout.LayoutParams lpTitle = new LinearLayout.LayoutParams(
-                                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                                            ViewGroup.LayoutParams.MATCH_PARENT
-                                    );
-                                    lpTitle.gravity = Gravity.START | Gravity.CENTER_VERTICAL;
-                                    group.addView(tvTitle, 0, lpTitle);
-                                }
-                            } catch (Throwable ignored) {}
-                        }
-                    }
-
-                    // 3. Ensure button container is visible and styled
-                    LinearLayout container = (LinearLayout) XposedHelpers.getObjectField(param.thisObject, "mCaptionButtonContainer");
-                    if (container != null) {
-                        container.setVisibility(View.VISIBLE);
-                        for (int i = 0; i < container.getChildCount(); i++) {
-                            View child = container.getChildAt(i);
-                            if (child != null) {
-                                child.setVisibility(View.VISIBLE);
-                                child.setAlpha(1.0f);
-                            }
-                        }
-                    }
-                }
-            });
-
-            XposedBridge.log(TAG + "MiuiCaptionContainerView hooked successfully");
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "Failed hooking MiuiCaptionContainerView: " + t);
         }
     }
 
@@ -1035,11 +887,8 @@ public class WindowCaptionHook {
                 XposedBridge.hookAllMethods(cls, "draw", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.thisObject instanceof View) {
-                            View v = (View) param.thisObject;
-                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
-                                param.setResult(null);
-                            }
+                        if (param.thisObject instanceof View && ConfigManager.shouldApplyDeXTaskbar(((View) param.thisObject).getContext())) {
+                            param.setResult(null);
                         }
                     }
                 });
@@ -1047,19 +896,12 @@ public class WindowCaptionHook {
                 XposedBridge.hookAllMethods(cls, "onDraw", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.thisObject instanceof View) {
-                            View v = (View) param.thisObject;
-                            if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
-                                param.setResult(null);
-                            }
+                        if (param.thisObject instanceof View && ConfigManager.shouldApplyDeXTaskbar(((View) param.thisObject).getContext())) {
+                            param.setResult(null);
                         }
                     }
                 });
-
-                XposedBridge.log(TAG + "StatusBar class hooked: " + className);
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + "Failed hooking statusBar class " + className + ": " + t);
-            }
+            } catch (Throwable ignored) {}
         }
 
         try {
@@ -1077,25 +919,16 @@ public class WindowCaptionHook {
                         } catch (Throwable ignored) {}
                     }
                 });
-                XposedBridge.log(TAG + "StatusBarWindowControllerImpl.apply hooked");
             }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "Failed hooking StatusBarWindowControllerImpl: " + t);
-        }
+        } catch (Throwable ignored) {}
     }
 
     private static synchronized void registerStatusBarView(View v) {
         if (v == null) return;
-        boolean exists = false;
         for (WeakReference<View> ref : sStatusBarViews) {
-            if (ref.get() == v) {
-                exists = true;
-                break;
-            }
+            if (ref.get() == v) return;
         }
-        if (!exists) {
-            sStatusBarViews.add(new WeakReference<>(v));
-        }
+        sStatusBarViews.add(new WeakReference<>(v));
     }
 
     private static void updateStatusBarView(View v) {
@@ -1149,7 +982,6 @@ public class WindowCaptionHook {
                     "com.android.wm.shell.windowdecor.viewholder.AppHeaderViewHolder",
                     lpparam.classLoader
             );
-
             if (holderCls == null) return;
 
             XposedBridge.hookAllMethods(holderCls, "bindData", new XC_MethodHook() {
@@ -1158,62 +990,18 @@ public class WindowCaptionHook {
                     Object holder = param.thisObject;
                     View captionView = getField(holder, "captionView", View.class);
                     Context context = captionView != null ? captionView.getContext() : null;
+                    boolean show = shouldShowWindowsControls(context);
 
-                    if (!ConfigManager.isClassicWindowControlsEnabled(context)) {
-                        ImageButton minBtn = getField(holder, "minimizeWindowButton", ImageButton.class);
-                        if (minBtn != null) {
-                            minBtn.setVisibility(View.GONE);
-                            if (minBtn.getLayoutParams() != null) {
-                                minBtn.getLayoutParams().width = 0;
-                                minBtn.getLayoutParams().height = 0;
-                            }
-                            minBtn.setAlpha(0f);
+                    for (String fname : new String[]{"minimizeWindowButton", "maximizeWindowButton", "closeWindowButton"}) {
+                        ImageButton btn = getField(holder, fname, ImageButton.class);
+                        if (btn != null) {
+                            btn.setVisibility(show ? View.VISIBLE : View.GONE);
+                            btn.setAlpha(show ? 1.0f : 0f);
                         }
-                        ImageButton maxBtn = getField(holder, "maximizeWindowButton", ImageButton.class);
-                        if (maxBtn != null) {
-                            maxBtn.setVisibility(View.GONE);
-                            if (maxBtn.getLayoutParams() != null) {
-                                maxBtn.getLayoutParams().width = 0;
-                                maxBtn.getLayoutParams().height = 0;
-                            }
-                            maxBtn.setAlpha(0f);
-                        }
-                        ImageButton closeBtn = getField(holder, "closeWindowButton", ImageButton.class);
-                        if (closeBtn != null) {
-                            closeBtn.setVisibility(View.GONE);
-                            if (closeBtn.getLayoutParams() != null) {
-                                closeBtn.getLayoutParams().width = 0;
-                                closeBtn.getLayoutParams().height = 0;
-                            }
-                            closeBtn.setAlpha(0f);
-                        }
-                        return;
-                    }
-
-                    ImageButton minBtn = getField(holder, "minimizeWindowButton", ImageButton.class);
-                    if (minBtn != null) {
-                        minBtn.setVisibility(View.VISIBLE);
-                        minBtn.setAlpha(1.0f);
-                    }
-
-                    ImageButton maxBtn = getField(holder, "maximizeWindowButton", ImageButton.class);
-                    if (maxBtn != null) {
-                        maxBtn.setVisibility(View.VISIBLE);
-                        maxBtn.setAlpha(1.0f);
-                    }
-
-                    ImageButton closeBtn = getField(holder, "closeWindowButton", ImageButton.class);
-                    if (closeBtn != null) {
-                        closeBtn.setVisibility(View.VISIBLE);
-                        closeBtn.setAlpha(1.0f);
                     }
                 }
             });
-
-            XposedBridge.log(TAG + "AppHeaderViewHolder hooked successfully");
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "Failed hooking AppHeaderViewHolder: " + t);
-        }
+        } catch (Throwable ignored) {}
     }
 
     @SuppressWarnings("unchecked")

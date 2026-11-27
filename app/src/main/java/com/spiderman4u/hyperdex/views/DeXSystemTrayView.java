@@ -173,38 +173,52 @@ public class DeXSystemTrayView extends LinearLayout {
         lpBattery.setMarginStart(dp(2));
         addView(batteryLayout, lpBattery);
 
-        // 6. Clock and Date Group (2-line clean DeX typography)
+        // 6. Clock and Date Group (2-line clean DeX typography without font padding clipping)
         LinearLayout clockLayout = new LinearLayout(context);
         clockLayout.setOrientation(VERTICAL);
         clockLayout.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
-        clockLayout.setPadding(dp(6), 0, dp(6), 0);
-        clockLayout.setOnClickListener(v -> openClock(context));
+        clockLayout.setPadding(dp(6), 0, dp(4), 0);
+        clockLayout.setOnClickListener(v -> {
+            animateTapBounce(v);
+            openClock(context);
+        });
 
         tvTime = new TextView(context);
         tvTime.setTextColor(Color.WHITE);
-        tvTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        tvTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10.5f);
         tvTime.setTypeface(null, Typeface.BOLD);
+        tvTime.setIncludeFontPadding(false);
         clockLayout.addView(tvTime);
 
         tvDate = new TextView(context);
         tvDate.setTextColor(Color.parseColor("#A0A2AA"));
-        tvDate.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9.5f);
-        clockLayout.addView(tvDate);
+        tvDate.setTextSize(TypedValue.COMPLEX_UNIT_SP, 9f);
+        tvDate.setIncludeFontPadding(false);
+        LinearLayout.LayoutParams lpDate = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lpDate.topMargin = dp(1);
+        clockLayout.addView(tvDate, lpDate);
 
-        addView(clockLayout);
+        addView(clockLayout, new LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // 7. Far right "Show Desktop" vertical touch strip
+        // 7. Far right "Show Desktop" touch zone + pill strip
+        FrameLayout desktopStripBtn = new FrameLayout(context);
+        desktopStripBtn.setPadding(dp(4), 0, dp(3), 0);
+        desktopStripBtn.setOnClickListener(v -> {
+            animateTapBounce(v);
+            DeXNavButtonsView.sendNavAction(context, "minimize_all");
+            triggerHome(context);
+        });
+
         vDesktopStrip = new View(context);
         GradientDrawable stripBg = new GradientDrawable();
-        stripBg.setColor(Color.parseColor("#4DFFFFFF"));
-        stripBg.setCornerRadius(dp(1));
+        stripBg.setColor(Color.parseColor("#59FFFFFF"));
+        stripBg.setCornerRadius(dp(1.5f));
         vDesktopStrip.setBackground(stripBg);
-        vDesktopStrip.setOnClickListener(v -> triggerHome(context));
+        FrameLayout.LayoutParams lpPill = new FrameLayout.LayoutParams(dp(2.5f), dp(20));
+        lpPill.gravity = Gravity.CENTER;
+        desktopStripBtn.addView(vDesktopStrip, lpPill);
 
-        LayoutParams lpStrip = new LayoutParams(dp(2), dp(18));
-        lpStrip.setMarginStart(dp(4));
-        lpStrip.setMarginEnd(dp(2));
-        addView(vDesktopStrip, lpStrip);
+        addView(desktopStripBtn, new LayoutParams(dp(12), ViewGroup.LayoutParams.MATCH_PARENT));
 
         updateResponsiveLayout();
         updateClock();

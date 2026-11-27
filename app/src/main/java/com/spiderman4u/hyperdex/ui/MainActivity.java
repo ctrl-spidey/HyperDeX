@@ -22,6 +22,7 @@ public class MainActivity extends AppCompatActivity {
     private MaterialSwitch switchNavButtons;
     private MaterialSwitch switchSearchButton;
     private MaterialSwitch switchFloatingPopups;
+    private MaterialSwitch switchWindowControls;
 
     private TextView tvTaskbarHeightVal;
     private SeekBar seekTaskbarHeight;
@@ -57,6 +58,7 @@ public class MainActivity extends AppCompatActivity {
         switchNavButtons = findViewById(R.id.switch_nav_buttons);
         switchSearchButton = findViewById(R.id.switch_search_button);
         switchFloatingPopups = findViewById(R.id.switch_floating_popups);
+        switchWindowControls = findViewById(R.id.switch_window_controls);
 
         tvTaskbarHeightVal = findViewById(R.id.tv_taskbar_height_val);
         seekTaskbarHeight = findViewById(R.id.seek_taskbar_height);
@@ -92,6 +94,7 @@ public class MainActivity extends AppCompatActivity {
         switchNavButtons.setChecked(ConfigManager.isShowNavButtons(this));
         switchSearchButton.setChecked(ConfigManager.isShowSearchButton(this));
         switchFloatingPopups.setChecked(ConfigManager.isFloatingPopupsEnabled(this));
+        switchWindowControls.setChecked(ConfigManager.isClassicWindowControlsEnabled(this));
 
         // Load Sliders
         int height = ConfigManager.getTaskbarHeight(this);
@@ -135,6 +138,10 @@ public class MainActivity extends AppCompatActivity {
 
         switchFloatingPopups.setOnCheckedChangeListener((btn, isChecked) -> {
             ConfigManager.setBoolean(this, Constants.PREF_FLOATING_POPUPS, isChecked);
+        });
+
+        switchWindowControls.setOnCheckedChangeListener((btn, isChecked) -> {
+            ConfigManager.setBoolean(this, Constants.PREF_WINDOW_CONTROLS, isChecked);
         });
 
         // Sliders Listeners
@@ -224,6 +231,7 @@ public class MainActivity extends AppCompatActivity {
         switchNavButtons.setEnabled(enabled);
         switchSearchButton.setEnabled(enabled);
         switchFloatingPopups.setEnabled(enabled);
+        switchWindowControls.setEnabled(enabled);
         seekTaskbarHeight.setEnabled(enabled);
         seekIconSize.setEnabled(enabled);
         seekIconSpacing.setEnabled(enabled);
