@@ -15,6 +15,7 @@ import android.service.notification.StatusBarNotification;
 import android.view.InputEvent;
 import android.view.KeyEvent;
 
+import com.spiderman4u.hyperdex.config.ConfigManager;
 import com.spiderman4u.hyperdex.config.Constants;
 
 import java.lang.reflect.Method;
