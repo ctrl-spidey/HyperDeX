@@ -90,6 +90,11 @@ public class DeXSystemTrayView extends LinearLayout {
         ivScreenshot.setPadding(dp(4), dp(4), dp(4), dp(4));
         ivScreenshot.setImageDrawable(DeXVectorDrawables.createScreenshotDrawable(iconColor));
         ivScreenshot.setOnClickListener(v -> {
+            try {
+                Intent scIntent = new Intent("com.miui.screenshot.action.SCREENSHOT");
+                scIntent.setPackage("com.miui.screenshot");
+                context.sendBroadcast(scIntent);
+            } catch (Throwable ignored) {}
             DeXNavButtonsView.sendNavAction(context, "screenshot");
         });
         addView(ivScreenshot, new LayoutParams(btnSize, btnSize));

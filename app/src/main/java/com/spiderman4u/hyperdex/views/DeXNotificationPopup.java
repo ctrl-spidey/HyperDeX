@@ -131,6 +131,7 @@ public class DeXNotificationPopup {
             }
             try {
                 Intent intent = new Intent(Constants.ACTION_CLEAR_NOTIFICATIONS);
+                intent.setPackage("com.android.systemui");
                 context.sendBroadcast(intent);
             } catch (Throwable ignored) {}
             listContainer.removeAllViews();

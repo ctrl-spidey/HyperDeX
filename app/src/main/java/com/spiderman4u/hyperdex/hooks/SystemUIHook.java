@@ -59,6 +59,47 @@ public class SystemUIHook {
         }
 
         hookNotifications(lpparam);
+        hookHeadsUpSuppression(lpparam);
+    }
+
+    private static void hookHeadsUpSuppression(XC_LoadPackage.LoadPackageParam lpparam) {
+        String[] headsUpClasses = new String[] {
+            "com.android.systemui.statusbar.notification.headsup.HeadsUpManagerImpl",
+            "com.android.systemui.statusbar.policy.HeadsUpManager",
+            "com.android.systemui.statusbar.phone.HeadsUpManagerPhone"
+        };
+        for (String clsName : headsUpClasses) {
+            try {
+                Class<?> cls = XposedHelpers.findClassIfExists(clsName, lpparam.classLoader);
+                if (cls != null) {
+                    XposedBridge.hookAllMethods(cls, "showNotification", new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                            if (sContext != null && ConfigManager.shouldApplyDeXTaskbar(sContext)) {
+                                param.setResult(null); // Suppress top heads-up banner in DeX mode!
+                            }
+                        }
+                    });
+                }
+            } catch (Throwable ignored) {}
+        }
+
+        try {
+            Class<?> nispCls = XposedHelpers.findClassIfExists(
+                    "com.android.systemui.statusbar.notification.interruption.NotificationInterruptStateProviderImpl",
+                    lpparam.classLoader
+            );
+            if (nispCls != null) {
+                XposedBridge.hookAllMethods(nispCls, "shouldHeadsUp", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (sContext != null && ConfigManager.shouldApplyDeXTaskbar(sContext)) {
+                            param.setResult(false);
+                        }
+                    }
+                });
+            }
+        } catch (Throwable ignored) {}
     }
 
     private static void registerReceivers(Context context) {
@@ -173,12 +214,14 @@ public class SystemUIHook {
             if (title == null && text == null) return;
 
             Intent intent = new Intent(Constants.ACTION_NEW_NOTIFICATION);
+            intent.setPackage("com.miui.home");
             intent.putExtra("pkg", sbn.getPackageName());
             intent.putExtra("title", title != null ? title.toString().trim() : "");
             intent.putExtra("text", text != null ? text.toString().trim() : "");
             intent.putExtra("post_time", sbn.getPostTime());
             intent.putExtra("key", sbn.getKey());
             sContext.sendBroadcast(intent);
+            XposedBridge.log(TAG + "Broadcasted new notification for " + sbn.getPackageName());
         } catch (Throwable t) {
             XposedBridge.log(TAG + "broadcastNewNotification error: " + t);
         }
@@ -210,6 +253,15 @@ public class SystemUIHook {
 
     private static void triggerScreenshot() {
         // 1. Native MIUI / HyperOS screenshot broadcast
+        try {
+            if (sContext != null) {
+                Intent intent = new Intent("com.miui.screenshot.action.SCREENSHOT");
+                intent.setPackage("com.miui.screenshot");
+                sContext.sendBroadcast(intent);
+                return;
+            }
+        } catch (Throwable ignored) {}
+
         try {
             if (sContext != null) {
                 Intent intent = new Intent("com.miui.screenshot.ACTION_SCREENSHOT");

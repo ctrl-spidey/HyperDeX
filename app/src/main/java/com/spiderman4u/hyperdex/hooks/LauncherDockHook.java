@@ -55,6 +55,7 @@ public class LauncherDockHook {
         hookIconContainers(lpparam);
         hookCellBackground(lpparam);
         hookLauncherAppLaunchAndResume(lpparam);
+        hookNormalModeDock(lpparam);
     }
 
     private static void hookHotSeats(XC_LoadPackage.LoadPackageParam lpparam) {
@@ -1145,7 +1146,9 @@ public class LauncherDockHook {
         if (dockContainer == null) return;
         dockContainer.post(() -> {
             try {
-                dockContainer.setTranslationY(0f);
+                dockContainer.animate().cancel();
+                dockContainer.animate().translationY(0f).setDuration(220)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
                 ViewGroup.LayoutParams lp = dockContainer.getLayoutParams();
                 if (lp instanceof android.view.WindowManager.LayoutParams) {
                     android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) lp;
@@ -1163,42 +1166,98 @@ public class LauncherDockHook {
     }
 
     private static void hookLauncherAppLaunchAndResume(XC_LoadPackage.LoadPackageParam lpparam) {
+        // 1. Hook AllAppsController (drawer / spotlight in workstation mode)
         try {
-            Class<?> launcherCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.Launcher", lpparam.classLoader);
-            if (launcherCls != null) {
-                // When any app is launched from launcher
-                XposedBridge.hookAllMethods(launcherCls, "startActivitySafely", new XC_MethodHook() {
+            Class<?> allAppsCtrl = XposedHelpers.findClassIfExists("com.miui.home.launcher.laptop.AllAppsController", lpparam.classLoader);
+            if (allAppsCtrl != null) {
+                String[] resetMethods = new String[] {
+                    "closeAllApps", "onHomeButtonPressed", "onBackPressed", "onScreenContentHide", "changeScreenContentOnClose"
+                };
+                for (String mName : resetMethods) {
+                    try {
+                        XposedBridge.hookAllMethods(allAppsCtrl, mName, new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                                resetDockToBottom();
+                            }
+                        });
+                    } catch (Throwable ignored) {}
+                }
+                XposedBridge.log(TAG + "AllAppsController hooks applied successfully");
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Failed hooking AllAppsController: " + t);
+        }
+
+        // 2. Hook LaptopDockController item clicks & gestures
+        try {
+            Class<?> dockCtrlCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.laptop.dockbar.LaptopDockController", lpparam.classLoader);
+            if (dockCtrlCls != null) {
+                XposedBridge.hookAllMethods(dockCtrlCls, "onLauncherItemClicked", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         resetDockToBottom();
                     }
                 });
-
-                // When returning to home screen
-                XposedBridge.hookAllMethods(launcherCls, "onResume", new XC_MethodHook() {
+                XposedBridge.hookAllMethods(dockCtrlCls, "slideDownDockEvent", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         resetDockToBottom();
                     }
                 });
             }
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + "Failed hooking Launcher app launch & resume: " + t);
-        }
+        } catch (Throwable ignored) {}
 
+        // 3. Hook Activity.startActivity for Launcher process
         try {
-            Class<?> allAppsCtrl = XposedHelpers.findClassIfExists("com.miui.home.launcher.laptop.LaptopAllAppsController", lpparam.classLoader);
-            if (allAppsCtrl != null) {
-                XposedBridge.hookAllMethods(allAppsCtrl, "hideAllAppsWindow", new XC_MethodHook() {
+            Class<?> actCls = XposedHelpers.findClassIfExists("android.app.Activity", lpparam.classLoader);
+            if (actCls != null) {
+                XposedBridge.hookAllMethods(actCls, "startActivity", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        resetDockToBottom();
+                        if (param.thisObject != null && param.thisObject.getClass().getName().contains("miui.home")) {
+                            resetDockToBottom();
+                        }
                     }
                 });
-                XposedBridge.hookAllMethods(allAppsCtrl, "closeAllApps", new XC_MethodHook() {
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    private static void hookNormalModeDock(XC_LoadPackage.LoadPackageParam lpparam) {
+        try {
+            Class<?> normalDockCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.dock.DockContainerView", lpparam.classLoader);
+            if (normalDockCls != null) {
+                XposedBridge.hookAllMethods(normalDockCls, "onAttachedToWindow", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        resetDockToBottom();
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            v.setBackgroundColor(Color.TRANSPARENT);
+                        }
+                    }
+                });
+                XposedBridge.hookAllMethods(normalDockCls, "setBackground", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.args[0] = null;
+                    }
+                });
+            }
+        } catch (Throwable ignored) {}
+
+        try {
+            Class<?> dockWmCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.dock.v3.view.DockWindowManager", lpparam.classLoader);
+            if (dockWmCls != null) {
+                XposedBridge.hookAllMethods(dockWmCls, "createWindow", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        try {
+                            View root = (View) XposedHelpers.getObjectField(param.thisObject, "dockRootView");
+                            if (root != null) {
+                                root.setBackgroundColor(Color.TRANSPARENT);
+                            }
+                        } catch (Throwable ignored) {}
                     }
                 });
             }

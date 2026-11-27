@@ -233,7 +233,11 @@ public class DeXTaskbarView extends FrameLayout {
         if (!isNotifReceiverRegistered && getContext() != null) {
             try {
                 android.content.IntentFilter filter = new android.content.IntentFilter(com.spiderman4u.hyperdex.config.Constants.ACTION_NEW_NOTIFICATION);
-                getContext().registerReceiver(mNotifReceiver, filter);
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    getContext().registerReceiver(mNotifReceiver, filter, Context.RECEIVER_EXPORTED);
+                } else {
+                    getContext().registerReceiver(mNotifReceiver, filter);
+                }
                 isNotifReceiverRegistered = true;
             } catch (Throwable ignored) {}
         }

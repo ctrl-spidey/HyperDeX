@@ -407,6 +407,7 @@ public class DeXDockAppsView extends HorizontalScrollView {
         // 2. Broadcast to SystemUIHook WindowCaptionHook
         try {
             Intent intent = new Intent(Constants.ACTION_NAV_TRIGGER);
+            intent.setPackage("com.android.systemui");
             intent.putExtra(Constants.EXTRA_NAV_ACTION, "minimize_task");
             intent.putExtra("task_id", taskId);
             context.sendBroadcast(intent);
@@ -420,9 +421,12 @@ public class DeXDockAppsView extends HorizontalScrollView {
         try {
             ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
             if (am != null) {
-                am.moveTaskToFront(taskId, ActivityManager.MOVE_TASK_WITH_HOME);
+                android.app.ActivityOptions opts = android.app.ActivityOptions.makeBasic();
+                am.moveTaskToFront(taskId, ActivityManager.MOVE_TASK_WITH_HOME, opts.toBundle());
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable t) {
+            XposedBridge.log("[HyperDeX] moveTaskToFront failed: " + t);
+        }
 
         // 2. Un-hide if eluded by workstation manager
         try {
@@ -438,6 +442,7 @@ public class DeXDockAppsView extends HorizontalScrollView {
             }
         } catch (Throwable ignored) {}
 
+        LauncherDockHook.resetDockToBottom();
         mFocusedTaskPkg = pkg;
     }
 

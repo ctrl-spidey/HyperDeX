@@ -209,6 +209,7 @@ public class DeXNavButtonsView extends LinearLayout {
     public static void sendNavAction(Context context, String action) {
         try {
             Intent intent = new Intent(SystemUIHook.ACTION_NAV_TRIGGER);
+            intent.setPackage("com.android.systemui");
             intent.putExtra(SystemUIHook.EXTRA_NAV_ACTION, action);
             context.sendBroadcast(intent);
         } catch (Throwable ignored) {}
