@@ -1163,7 +1163,7 @@ public class LauncherDockHook {
                     if (intent == null) return;
                     int tid = intent.getIntExtra("task_id", -1);
                     if (tid > 0) {
-                        DeXDockAppsView.hideTaskDirectly(ctx, tid);
+                        com.spiderman4u.hyperdex.views.DeXDockAppsView.hideTaskDirectly(ctx, tid);
                     }
                 }
             }, hideFilter, Context.RECEIVER_EXPORTED);
