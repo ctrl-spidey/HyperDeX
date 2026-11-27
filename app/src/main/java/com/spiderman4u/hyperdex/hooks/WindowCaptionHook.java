@@ -1,11 +1,11 @@
 package com.spiderman4u.hyperdex.hooks;
 
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
-import android.animation.ValueAnimator;
 import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.content.Intent;
 import android.database.ContentObserver;
 import android.graphics.Canvas;
@@ -16,7 +16,6 @@ import android.graphics.RectF;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.MotionEvent;
@@ -33,9 +32,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.WeakHashMap;
-import java.util.concurrent.ConcurrentHashMap;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -45,7 +42,9 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class WindowCaptionHook {
 
     private static final String TAG = "[HyperDeX-Caption] ";
-    private static final int PILL_WIDTH_DP = 112;
+    private static final int PILL_WIDTH_DP = 124;
+    private static final float MINIMIZE_END = 0.40f;
+    private static final float MAXIMIZE_END = 2f / 3f;
     private static final int PILL_HEIGHT_DP = 20;
 
     private static final List<WeakReference<View>> sStatusBarViews = new ArrayList<>();
@@ -71,9 +70,9 @@ public class WindowCaptionHook {
     private static final Map<Object, Object> sTouchListenerToDotMap = new WeakHashMap<>();
     private static final Map<View, float[]> sTouchTrackMap = new WeakHashMap<>();
     private static final Map<Object, float[]> sLiveSurfaceData = new WeakHashMap<>();
-    private static final Set<Integer> sMinimizingTasks = ConcurrentHashMap.newKeySet();
     private static volatile Object sLastActiveDotObj = null;
-    private static volatile long sLastActionTimestamp = 0L;
+    private static final Map<Object, Long> sLastCaptionGesture = new WeakHashMap<>();
+    private static volatile long sCaptionDownTime;
     private static volatile float sLastTouchRawX = -1f;
     private static volatile float sLastTouchRawY = -1f;
 
@@ -90,7 +89,7 @@ public class WindowCaptionHook {
         hookMiuiDecorationDotView(lpparam);
         hookMiuiDecorationTouchListener(lpparam);
         hookAppHeaderViewHolder(lpparam);
-        hookSmoothMinimizeAnimator(lpparam);
+        hookDesktopHideAnimation(lpparam);
         hookStatusBar(lpparam);
     }
 
@@ -106,51 +105,13 @@ public class WindowCaptionHook {
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.args.length > 0 && param.args[0] instanceof MotionEvent) {
                             MotionEvent ev = (MotionEvent) param.args[0];
+                            sCaptionDownTime = ev.getDownTime();
                             sLastTouchRawX = ev.getRawX();
                             sLastTouchRawY = ev.getRawY();
                         }
                     }
                 });
                 XposedBridge.log(TAG + "MulWinSwitchEventHandler hooked for coordinate tracking");
-            }
-        } catch (Throwable ignored) {}
-    }
-
-    private static void hookSmoothMinimizeAnimator(XC_LoadPackage.LoadPackageParam lpparam) {
-        try {
-            Class<?> minAnimCls = XposedHelpers.findClassIfExists(
-                    "com.android.wm.shell.shared.animation.MinimizeAnimator",
-                    lpparam.classLoader
-            );
-            if (minAnimCls != null) {
-                XposedBridge.hookAllMethods(minAnimCls, "create", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        // When our custom squeezy animation is active, suppress Xiaomi's native minimize
-                        // animation entirely to prevent double-animation glitch
-                        if (!sMinimizingTasks.isEmpty()) {
-                            // Return a no-op animator that does nothing
-                            ValueAnimator noop = ValueAnimator.ofFloat(0f, 1f);
-                            noop.setDuration(1);
-                            param.setResult(noop);
-                        }
-                    }
-
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        if (param.getResult() instanceof ValueAnimator) {
-                            ValueAnimator va = (ValueAnimator) param.getResult();
-                            if (va.getDuration() <= 1) return; // our no-op, skip
-                        }
-                        Object res = param.getResult();
-                        if (res instanceof android.animation.Animator) {
-                            android.animation.Animator anim = (android.animation.Animator) res;
-                            anim.setDuration(280);
-                            anim.setInterpolator(new android.view.animation.PathInterpolator(0.22f, 1.0f, 0.36f, 1.0f));
-                        }
-                    }
-                });
-                XposedBridge.log(TAG + "MinimizeAnimator hooked - suppresses native when HyperDeX minimizing");
             }
         } catch (Throwable ignored) {}
     }
@@ -215,6 +176,7 @@ public class WindowCaptionHook {
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     if (param.args.length == 0 || !(param.args[0] instanceof MotionEvent)) return;
                     MotionEvent ev = (MotionEvent) param.args[0];
+                    sCaptionDownTime = ev.getDownTime();
                     sLastTouchRawX = ev.getRawX();
                     sLastTouchRawY = ev.getRawY();
 
@@ -253,13 +215,6 @@ public class WindowCaptionHook {
                     Context context = getDotContext(dotObj);
                     if (!shouldShowWindowsControls(context)) return;
 
-                    long now = SystemClock.uptimeMillis();
-                    if (now - sLastActionTimestamp < 220) {
-                        param.setResult(null);
-                        return;
-                    }
-                    sLastActionTimestamp = now;
-
                     // Clear stale surface data to force fresh MiuiFreeformModeTaskInfo lookup
                     sLiveSurfaceData.remove(dotObj);
 
@@ -271,10 +226,15 @@ public class WindowCaptionHook {
 
                     float pillLeft = centerX - pillW / 2f;
                     float ratio = (sLastTouchRawX >= 0f) ? ((sLastTouchRawX - pillLeft) / pillW) : 0.5f;
-                    ratio = Math.max(0f, Math.min(1f, ratio));
+                    if (sLastTouchRawX < 0f || ratio < 0f || ratio > 1f) return;
 
                     XposedBridge.log(TAG + "handleCaptionClicked rawX=" + sLastTouchRawX + " pillLeft=" + pillLeft
                             + " visW=" + visRect[2] + " scale=" + visRect[4] + " ratio=" + ratio + " taskId=" + taskId);
+
+                    if (Long.valueOf(sCaptionDownTime).equals(sLastCaptionGesture.put(dotObj, sCaptionDownTime))) {
+                        param.setResult(null);
+                        return;
+                    }
 
                     View dotView = null;
                     try {
@@ -284,9 +244,9 @@ public class WindowCaptionHook {
                         }
                     } catch (Throwable ignored) {}
 
-                    if (ratio < 0.34f) {
+                    if (ratio < MINIMIZE_END) {
                         performMinimize(context, taskId, dotObj);
-                    } else if (ratio < 0.67f) {
+                    } else if (ratio < MAXIMIZE_END) {
                         performMaximize(context, taskId, dotObj, dotView);
                     } else {
                         performClose(context, taskId, dotObj);
@@ -787,8 +747,8 @@ public class WindowCaptionHook {
                     divPaint.setColor(Color.parseColor("#24FFFFFF"));
                     divPaint.setStrokeWidth(1f);
                     float divPadY = barThick * 0.28f;
-                    canvas.drawLine(barLen / 3f, divPadY, barLen / 3f, barThick - divPadY, divPaint);
-                    canvas.drawLine((barLen * 2f) / 3f, divPadY, (barLen * 2f) / 3f, barThick - divPadY, divPaint);
+                    canvas.drawLine(barLen * MINIMIZE_END, divPadY, barLen * MINIMIZE_END, barThick - divPadY, divPaint);
+                    canvas.drawLine(barLen * MAXIMIZE_END, divPadY, barLen * MAXIMIZE_END, barThick - divPadY, divPaint);
 
                     float cy = barThick / 2f;
                     Paint iconPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -798,13 +758,13 @@ public class WindowCaptionHook {
                     iconPaint.setStrokeCap(Paint.Cap.ROUND);
                     iconPaint.setStrokeJoin(Paint.Join.ROUND);
 
-                    // A. Minimize [ ─ ] (Left Third)
-                    float minCx = barLen / 6f;
+                    // A. Minimize [ ─ ] (Left)
+                    float minCx = barLen * MINIMIZE_END / 2f;
                     float minHalf = dp(context, 4.8f);
                     canvas.drawLine(minCx - minHalf, cy, minCx + minHalf, cy, iconPaint);
 
-                    // B. Maximize / Restore [ ▢ ] (Middle Third)
-                    float maxCx = barLen / 2f;
+                    // B. Maximize / Restore [ ▢ ] (Middle)
+                    float maxCx = barLen * (MINIMIZE_END + MAXIMIZE_END) / 2f;
                     float sqHalf = dp(context, 4.0f);
                     if (isFs) {
                         float off = dp(context, 1.5f);
@@ -902,15 +862,9 @@ public class WindowCaptionHook {
         if (action == MotionEvent.ACTION_UP) {
             boolean wasDrag = track != null && track[2] > 0.5f;
             sTouchTrackMap.remove(view);
-            if (wasDrag) {
+            if (track == null || wasDrag || data == null) {
                 return false;
             }
-
-            long now = SystemClock.uptimeMillis();
-            if (now - sLastActionTimestamp < 220) {
-                return true;
-            }
-            sLastActionTimestamp = now;
 
             int rawW = view.getWidth();
             int rawH = view.getHeight();
@@ -922,16 +876,21 @@ public class WindowCaptionHook {
             float ratio = touchAlong / barLen;
 
             int taskId = (data != null) ? data.taskId : -1;
-            Object dotObj = (data != null) ? data.dotInstance : sLastActiveDotObj;
+            Object dotObj = data.dotInstance;
+
+            if (dotObj == null) return false;
+            long downTime = event.getDownTime();
+            sCaptionDownTime = downTime;
+            if (Long.valueOf(downTime).equals(sLastCaptionGesture.put(dotObj, downTime))) return true;
 
             // Clear stale surface data to force fresh rect calculation
             if (dotObj != null) sLiveSurfaceData.remove(dotObj);
 
             XposedBridge.log(TAG + "handlePillTouch UP x=" + touchAlong + "/" + barLen + " ratio=" + ratio + " taskId=" + taskId);
 
-            if (ratio < 0.34f) {
+            if (ratio < MINIMIZE_END) {
                 performMinimize(context, taskId, dotObj);
-            } else if (ratio < 0.67f) {
+            } else if (ratio < MAXIMIZE_END) {
                 performMaximize(context, taskId, dotObj, view);
             } else {
                 performClose(context, taskId, dotObj);
@@ -992,60 +951,145 @@ public class WindowCaptionHook {
         }
     }
 
-    public static void performMinimize(Context context, int taskId, Object dotInstance) {
-        if (context == null) return;
-        if (dotInstance == null && taskId > 0) {
-            for (Map.Entry<Object, TaskData> e : sDotToTaskDataMap.entrySet()) {
-                if (e.getValue() != null && e.getValue().taskId == taskId) {
-                    dotInstance = e.getKey();
-                    break;
-                }
+    private static final java.util.Set<Integer> sMinimizingTasks =
+            java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    private static final Map<Integer, Long> sDesktopHideDeadlines =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static final Map<Object, Integer> sDesktopHideStates =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static final Map<Integer, Object> sDesktopHideSurfaces =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void maskDesktopHideSurface(int taskId) throws Throwable {
+        Object surface = sDesktopHideSurfaces.get(taskId);
+        if (surface == null || !(boolean) XposedHelpers.callMethod(surface, "isValid")) return;
+        Object transaction = Class.forName("android.view.SurfaceControl$Transaction")
+                .getDeclaredConstructor().newInstance();
+        try {
+            XposedHelpers.callMethod(transaction, "hide", surface);
+            XposedHelpers.callMethod(transaction, "setAlpha", surface, 0f);
+            XposedHelpers.callMethod(transaction, "apply");
+        } finally {
+            XposedHelpers.callMethod(transaction, "close");
+        }
+    }
+
+    private static void hookDesktopHideAnimation(XC_LoadPackage.LoadPackageParam lpparam) {
+        Class<?> executor = XposedHelpers.findClassIfExists(
+                "com.android.wm.shell.multitasking.common.animation.MultiTaskingFolmeAnimExecutor",
+                lpparam.classLoader);
+        if (executor == null) return;
+
+        XposedBridge.hookAllMethods(executor, "removeFolmeStateAndRunFinishRunnable", new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                if (param.args.length != 1 || sDesktopHideStates.isEmpty()) return;
+                sDesktopHideStates.remove(param.args[0]);
             }
-        }
-        if (dotInstance == null) {
-            executeActualMinimize(context, taskId, null);
-            return;
-        }
+        });
 
-        final Object resolvedDot = dotInstance;
-        final int resolvedTaskId = taskId;
-        if (resolvedTaskId > 0 && !sMinimizingTasks.add(resolvedTaskId)) {
-            return;
-        }
-
-        // Clear stale surface data before animation to ensure fresh rect
-        sLiveSurfaceData.remove(resolvedDot);
-
-        new Handler(Looper.getMainLooper()).post(() -> {
-            try {
-                Object taskSurface = null;
-                Object captionSurface = null;
+        XposedBridge.hookAllMethods(executor, "getFolmeProperties", new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                if (param.args.length != 2 || sDesktopHideDeadlines.isEmpty()) return;
                 try {
-                    Object ctrl = XposedHelpers.getObjectField(resolvedDot, "mMiuiDecorationController");
-                    if (ctrl != null) {
-                        taskSurface = XposedHelpers.getObjectField(ctrl, "mTaskSurface");
+                    Object state = param.args[0];
+                    int taskId = (int) XposedHelpers.callMethod(state, "getTaskId");
+                    Object listener = XposedHelpers.callMethod(state, "getAnimationListener");
+                    if (listener == null || !listener.getClass().getName().endsWith(".MiuiDesktopModeAnimation$1")) return;
+                    Long deadline = sDesktopHideDeadlines.remove(taskId);
+                    if (deadline == null || android.os.SystemClock.uptimeMillis() >= deadline) return;
+
+                    // Run Xiaomi's final state and completion callbacks in a single frame.
+                    Object config = param.args[1];
+                    XposedHelpers.callMethod(config, "setEase", 1, new float[]{1f});
+                    XposedHelpers.callMethod(config, "setDelay", 0L);
+                    XposedHelpers.callMethod(config, "setMinDuration", 0L);
+                    Object ease = XposedHelpers.getObjectField(config, "ease");
+                    for (Object property : (java.util.Set<?>) XposedHelpers.callMethod(config, "getSpecialSet")) {
+                        Object special = XposedHelpers.callMethod(config, "getSpecialConfig", property);
+                        if (special != null) {
+                            XposedHelpers.callMethod(special, "setEase", ease);
+                            XposedHelpers.callMethod(special, "setDelay", 0L);
+                        }
                     }
-                } catch (Throwable ignored) {}
-                try {
-                    captionSurface = XposedHelpers.getObjectField(resolvedDot, "mCaptionContainerSurface");
-                } catch (Throwable ignored) {}
-
-                if (taskSurface == null) {
-                    if (resolvedTaskId > 0) sMinimizingTasks.remove(resolvedTaskId);
-                    executeActualMinimize(context, resolvedTaskId, resolvedDot);
-                    return;
+                    sDesktopHideStates.put(state, taskId);
+                    maskDesktopHideSurface(taskId);
+                    XposedBridge.log(TAG + "Shortened desktop hide animation for task " + taskId);
+                } catch (Throwable t) {
+                    XposedBridge.log(TAG + "Desktop hide animation timing unavailable: " + t);
                 }
-
-                playSqueezyMinimizeAndHide(context, resolvedTaskId, resolvedDot, taskSurface, captionSurface);
-            } catch (Throwable t) {
-                if (resolvedTaskId > 0) sMinimizingTasks.remove(resolvedTaskId);
-                executeActualMinimize(context, resolvedTaskId, resolvedDot);
             }
         });
     }
 
+    public static void performMinimize(Context context, int taskId, Object dotInstance) {
+        if (context == null) return;
+        if (taskId <= 0 && dotInstance != null) {
+            try {
+                Object info = XposedHelpers.getObjectField(dotInstance, "mRunningTaskInfo");
+                taskId = XposedHelpers.getIntField(info, "taskId");
+            } catch (Throwable ignored) {}
+        }
+        if (taskId <= 0) return;
+
+        final int id = taskId;
+        final Object caption = dotInstance;
+        new Handler(Looper.getMainLooper()).post(() -> {
+            Object dot = caption;
+            if (dot == null) {
+                for (Map.Entry<Object, TaskData> entry : sDotToTaskDataMap.entrySet()) {
+                    if (entry.getValue().taskId == id) {
+                        dot = entry.getKey();
+                        break;
+                    }
+                }
+            }
+            if (!sMinimizingTasks.add(id)) return;
+            try {
+                if (dot != null) {
+                    Object controller = XposedHelpers.getObjectField(dot, "mMiuiDecorationController");
+                    Object surface = XposedHelpers.getObjectField(controller, "mTaskSurface");
+                    if (surface != null && (boolean) XposedHelpers.callMethod(surface, "isValid")) {
+                        sLiveSurfaceData.remove(dot);
+                        playSqueezyMinimizeAndHide(context, id, dot, surface);
+                        return;
+                    }
+                }
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "Minimize animation unavailable for task " + id + ": " + t);
+            }
+            sMinimizingTasks.remove(id);
+            hideMinimizedTask(context, id, dot);
+        });
+    }
+
+    private static void hideMinimizedTask(Context context, int taskId, Object dot) {
+        if (dot != null && isTaskFullscreen(dot)) {
+            try {
+                Object info = XposedHelpers.getObjectField(dot, "mRunningTaskInfo");
+                Object token = XposedHelpers.getObjectField(info, "token");
+                Object transaction = Class.forName("android.window.WindowContainerTransaction")
+                        .getDeclaredConstructor().newInstance();
+                XposedHelpers.callMethod(transaction, "reorder", token, false);
+                Object transitions = XposedHelpers.getObjectField(dot, "mTransitions");
+                XposedHelpers.callMethod(transitions, "startTransition", 4, transaction, null);
+                return;
+            } catch (Throwable t) {
+                XposedBridge.log(TAG + "Direct minimize unavailable: " + t);
+            }
+        }
+        Intent hideIntent = new Intent(com.spiderman4u.hyperdex.config.Constants.ACTION_HIDE_TASK);
+        hideIntent.setPackage(com.spiderman4u.hyperdex.config.Constants.PKG_LAUNCHER);
+        hideIntent.putExtra("task_id", taskId);
+        context.sendBroadcast(hideIntent);
+    }
+
     private static void playSqueezyMinimizeAndHide(Context context, int taskId, Object dotObj,
-                                                   Object taskSurface, Object captionSurface) throws Throwable {
+                                                   Object taskSurface) throws Throwable {
         Rect disp = getDisplayBounds(context);
         float[] vis = computeVisualTaskRect(dotObj, context);
         final float startLeft = vis[0];
@@ -1064,26 +1108,6 @@ public class WindowCaptionHook {
 
         final Class<?> scTxCls = Class.forName("android.view.SurfaceControl$Transaction");
         final Object fTaskSurf = taskSurface;
-        final Object fCapSurf = captionSurface;
-
-        // Immediately hide caption pill to prevent lingering artifact
-        try {
-            if (fCapSurf != null && (boolean) XposedHelpers.callMethod(fCapSurf, "isValid")) {
-                Object hideTx = scTxCls.newInstance();
-                XposedHelpers.callMethod(hideTx, "setAlpha", fCapSurf, 0f);
-                XposedHelpers.callMethod(hideTx, "apply");
-                XposedHelpers.callMethod(hideTx, "close");
-            }
-        } catch (Throwable ignored) {}
-
-        // Raise the surface layer during animation to prevent z-fighting
-        try {
-            Object layerTx = scTxCls.newInstance();
-            XposedHelpers.callMethod(layerTx, "setLayer", fTaskSurf, Integer.MAX_VALUE - 1);
-            XposedHelpers.callMethod(layerTx, "apply");
-            XposedHelpers.callMethod(layerTx, "close");
-        } catch (Throwable ignored) {}
-
         ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
         anim.setDuration(380);  // Longer for smoother macOS-like feel
         // macOS minimize uses a smooth ease-in-out with slight overshoot
@@ -1112,9 +1136,6 @@ public class WindowCaptionHook {
                 float curLeft = curCx - (unscaledW * curScale) / 2f;
                 float curTop = curCy - (unscaledH * curScale) / 2f;
 
-                // Corner radius: increases as it shrinks for rounded pill effect
-                float corner = 24f + 108f * smoothP;
-
                 // Alpha: fully visible until 60%, then fade out smoothly
                 float alpha;
                 if (p < 0.60f) {
@@ -1127,7 +1148,6 @@ public class WindowCaptionHook {
                 Object tx = scTxCls.newInstance();
                 XposedHelpers.callMethod(tx, "setMatrix", fTaskSurf, curScale, 0f, 0f, curScale);
                 XposedHelpers.callMethod(tx, "setPosition", fTaskSurf, curLeft, curTop);
-                XposedHelpers.callMethod(tx, "setCornerRadius", fTaskSurf, corner);
                 XposedHelpers.callMethod(tx, "setAlpha", fTaskSurf, alpha);
                 XposedHelpers.callMethod(tx, "apply");
                 XposedHelpers.callMethod(tx, "close");
@@ -1141,38 +1161,55 @@ public class WindowCaptionHook {
                 if (finished) return;
                 finished = true;
 
-                // First hide the surface immediately (alpha=0) before WCT to prevent flash
-                try {
-                    if ((boolean) XposedHelpers.callMethod(fTaskSurf, "isValid")) {
-                        Object hideTx = scTxCls.newInstance();
-                        XposedHelpers.callMethod(hideTx, "setAlpha", fTaskSurf, 0f);
-                        XposedHelpers.callMethod(hideTx, "apply");
-                        XposedHelpers.callMethod(hideTx, "close");
-                    }
-                } catch (Throwable ignored) {}
-
-                // Execute the actual WCT minimize
-                executeActualMinimize(context, taskId, dotObj);
-
-                // Restore surface properties after system has hidden the task (delayed to avoid flash)
-                new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                    if (taskId > 0) sMinimizingTasks.remove(taskId);
-                    try {
-                        if ((boolean) XposedHelpers.callMethod(fTaskSurf, "isValid")) {
-                            Object tx = scTxCls.newInstance();
-                            XposedHelpers.callMethod(tx, "setAlpha", fTaskSurf, 1.0f);
-                            XposedHelpers.callMethod(tx, "setCornerRadius", fTaskSurf, 24f);
-                            XposedHelpers.callMethod(tx, "setMatrix", fTaskSurf, startScale, 0f, 0f, startScale);
-                            // Reset position to original
-                            XposedHelpers.callMethod(tx, "setPosition", fTaskSurf, startLeft, startTop);
-                            if (fCapSurf != null && (boolean) XposedHelpers.callMethod(fCapSurf, "isValid")) {
-                                XposedHelpers.callMethod(tx, "setAlpha", fCapSurf, 1.0f);
+                Handler handler = new Handler(Looper.getMainLooper());
+                long deadline = android.os.SystemClock.uptimeMillis() + 800;
+                if (!isTaskFullscreen(dotObj)) {
+                    sDesktopHideSurfaces.put(taskId, fTaskSurf);
+                    sDesktopHideDeadlines.put(taskId, deadline);
+                    handler.postDelayed(() -> sDesktopHideDeadlines.remove(taskId, deadline), 800);
+                }
+                hideMinimizedTask(context, taskId, dotObj);
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (android.os.SystemClock.uptimeMillis() < deadline) {
+                            if (sDesktopHideDeadlines.containsKey(taskId) || sDesktopHideStates.containsValue(taskId)) {
+                                handler.postDelayed(this, 16);
+                                return;
                             }
-                            XposedHelpers.callMethod(tx, "apply");
-                            XposedHelpers.callMethod(tx, "close");
+                            try {
+                                Object listener = XposedHelpers.getObjectField(dotObj, "mOnMiuiCaptionClickListener");
+                                Object organizer = XposedHelpers.getObjectField(listener, "mShellTaskOrganizer");
+                                Object info = XposedHelpers.callMethod(organizer, "getRunningTaskInfo", taskId);
+                                if (info != null && XposedHelpers.getBooleanField(info, "isVisible")) {
+                                    handler.postDelayed(this, 16);
+                                    return;
+                                }
+                            } catch (Throwable ignored) {
+                                handler.postDelayed(this, 32);
+                                return;
+                            }
                         }
-                    } catch (Throwable ignored) {}
-                }, 400);
+                        try {
+                            if ((boolean) XposedHelpers.callMethod(fTaskSurf, "isValid")) {
+                                Object tx = scTxCls.newInstance();
+                                XposedHelpers.callMethod(tx, "setMatrix", fTaskSurf, startScale, 0f, 0f, startScale);
+                                XposedHelpers.callMethod(tx, "setPosition", fTaskSurf, startLeft, startTop);
+                                XposedHelpers.callMethod(tx, "setAlpha", fTaskSurf, 1f);
+                                if (sDesktopHideSurfaces.containsKey(taskId)) {
+                                    XposedHelpers.callMethod(tx, "show", fTaskSurf);
+                                }
+                                XposedHelpers.callMethod(tx, "apply");
+                                XposedHelpers.callMethod(tx, "close");
+                            }
+                        } catch (Throwable ignored) {
+                        } finally {
+                            sDesktopHideSurfaces.remove(taskId);
+                            sDesktopHideStates.values().remove(taskId);
+                            sMinimizingTasks.remove(taskId);
+                        }
+                    }
+                });
             }
 
             @Override
@@ -1186,69 +1223,6 @@ public class WindowCaptionHook {
             }
         });
         anim.start();
-    }
-
-    private static void executeActualMinimize(Context context, int taskId, Object dotInstance) {
-        // 1. Broadcast to LauncherDockHook receiver
-        if (context != null && taskId > 0) {
-            try {
-                Intent hideIntent = new Intent(com.spiderman4u.hyperdex.config.Constants.ACTION_HIDE_TASK);
-                hideIntent.setPackage(com.spiderman4u.hyperdex.config.Constants.PKG_LAUNCHER);
-                hideIntent.putExtra("task_id", taskId);
-                context.sendBroadcast(hideIntent);
-            } catch (Throwable ignored) {}
-        }
-
-        // 2. Submit WindowContainerTransaction (setAlwaysOnTop=false + reorder to back) via WM Shell Transitions
-        // Matches Xiaomi MiuiDesktopModeTransitionHandler.fillHideFreeformWct + startDesktopTransition
-        if (dotInstance != null) {
-            try {
-                Object taskInfo = XposedHelpers.getObjectField(dotInstance, "mRunningTaskInfo");
-                Object token = (taskInfo != null) ? XposedHelpers.getObjectField(taskInfo, "token") : null;
-                if (token != null) {
-                    Class<?> wctCls = Class.forName("android.window.WindowContainerTransaction");
-                    Object wct = wctCls.newInstance();
-                    try {
-                        XposedHelpers.callMethod(wct, "setAlwaysOnTop", token, false);
-                    } catch (Throwable ignored) {}
-                    XposedHelpers.callMethod(wct, "reorder", token, false);
-
-                    boolean startedTransition = false;
-                    try {
-                        Object transitions = XposedHelpers.getObjectField(dotInstance, "mTransitions");
-                        if (transitions != null) {
-                            // WindowManager.TRANSIT_TO_BACK == 4
-                            XposedHelpers.callMethod(transitions, "startTransition", 4, wct, null);
-                            startedTransition = true;
-                            XposedBridge.log(TAG + "executeActualMinimize via Transitions.startTransition(TO_BACK) taskId=" + taskId);
-                        }
-                    } catch (Throwable t) {
-                        XposedBridge.log(TAG + "Transitions.startTransition failed: " + t);
-                    }
-
-                    if (!startedTransition) {
-                        Object taskOrg = XposedHelpers.getObjectField(dotInstance, "mTaskOrganizer");
-                        if (taskOrg != null) {
-                            XposedHelpers.callMethod(taskOrg, "applyTransaction", wct);
-                        }
-                    }
-                    return;
-                }
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + "executeActualMinimize via WCT failed: " + t);
-            }
-        }
-
-        try {
-            if (taskId > 0) {
-                Class<?> atmCls = Class.forName("android.app.ActivityTaskManager");
-                Object atm = atmCls.getMethod("getService").invoke(null);
-                try {
-                    Method moveTaskToRootTask = atm.getClass().getMethod("moveTaskToRootTask", int.class, int.class, boolean.class);
-                    moveTaskToRootTask.invoke(atm, taskId, -1, false);
-                } catch (Throwable ignored) {}
-            }
-        } catch (Throwable ignored) {}
     }
 
     public static void performMinimizeAll(Context context) {

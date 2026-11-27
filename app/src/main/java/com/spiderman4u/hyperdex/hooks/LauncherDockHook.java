@@ -22,6 +22,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
+import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 
@@ -33,6 +34,8 @@ import com.spiderman4u.hyperdex.views.DeXSystemTrayView;
 import com.spiderman4u.hyperdex.views.DeXTaskbarView;
 
 import java.lang.reflect.Field;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -46,6 +49,46 @@ public class LauncherDockHook {
     private static Object sCurrentDockContainerInstance = null;
     private static View sLaptopOverlayRootView = null;
     private static boolean sObserverRegistered = false;
+
+    private static final Map<View, float[]> sStockVisibility = new WeakHashMap<>();
+    private static final Map<View, WindowManager.LayoutParams> sStockWindowParams = new WeakHashMap<>();
+    private static final Map<View, int[]> sStockPadding = new WeakHashMap<>();
+    private static final Map<View, android.graphics.drawable.Drawable> sStockBackgrounds = new WeakHashMap<>();
+
+    private static void hideStockView(View view) {
+        sStockVisibility.putIfAbsent(view, new float[]{view.getVisibility(), view.getAlpha()});
+        view.setVisibility(View.GONE);
+        view.setAlpha(0f);
+    }
+
+    private static void saveStockWindowParams(View view, WindowManager.LayoutParams params) {
+        if (sStockWindowParams.containsKey(view)) return;
+        WindowManager.LayoutParams original = new WindowManager.LayoutParams();
+        original.copyFrom(params);
+        sStockWindowParams.put(view, original);
+    }
+
+    private static void saveStockPadding(View view) {
+        sStockPadding.putIfAbsent(view, new int[]{view.getPaddingLeft(), view.getPaddingTop(),
+                view.getPaddingRight(), view.getPaddingBottom()});
+    }
+
+    private static void restoreStockDock(View view) {
+        float[] visibility = sStockVisibility.remove(view);
+        if (visibility != null) {
+            view.setVisibility((int) visibility[0]);
+            view.setAlpha(visibility[1]);
+        }
+        int[] padding = sStockPadding.remove(view);
+        if (padding != null) view.setPadding(padding[0], padding[1], padding[2], padding[3]);
+        if (sStockBackgrounds.containsKey(view)) view.setBackground(sStockBackgrounds.remove(view));
+
+        WindowManager.LayoutParams params = sStockWindowParams.remove(view);
+        if (params != null && view.isAttachedToWindow()) {
+            WindowManager manager = view.getContext().getSystemService(WindowManager.class);
+            if (manager != null) manager.updateViewLayout(view, params);
+        }
+    }
 
     public static void init(XC_LoadPackage.LoadPackageParam lpparam) {
         hookHotSeats(lpparam);
@@ -402,6 +445,7 @@ public class LauncherDockHook {
                             Context ctx = container.getContext();
                             if (ConfigManager.shouldApplyDeXTaskbar(ctx)) {
                                 if (container.getPaddingBottom() != 0 || container.getPaddingTop() != 0) {
+                                    saveStockPadding(container);
                                     container.setPadding(0, 0, 0, 0);
                                 }
                                 container.post(() -> applyDockContainerDeXStyle(container, ctx));
@@ -419,6 +463,7 @@ public class LauncherDockHook {
                             Context ctx = container.getContext();
                             if (ConfigManager.shouldApplyDeXTaskbar(ctx)) {
                                 if (container.getPaddingBottom() != 0 || container.getPaddingTop() != 0) {
+                                    saveStockPadding(container);
                                     container.setPadding(0, 0, 0, 0);
                                 }
                                 int targetH = dp(ctx, ConfigManager.getTaskbarHeight(ctx));
@@ -433,8 +478,7 @@ public class LauncherDockHook {
                                 for (int i = 0; i < container.getChildCount(); i++) {
                                     View child = container.getChildAt(i);
                                     if (child != null && child.getId() != R.id.dex_taskbar_view) {
-                                        child.setVisibility(View.GONE);
-                                        child.setAlpha(0f);
+                                        hideStockView(child);
                                     }
                                 }
                             }
@@ -645,8 +689,7 @@ public class LauncherDockHook {
                         if (param.thisObject instanceof View) {
                             View v = (View) param.thisObject;
                             if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
-                                v.setVisibility(View.GONE);
-                                v.setAlpha(0f);
+                                hideStockView(v);
                                 v.setBackground(null);
                             }
                         }
@@ -659,8 +702,7 @@ public class LauncherDockHook {
                         if (param.thisObject instanceof View) {
                             View v = (View) param.thisObject;
                             if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
-                                v.setVisibility(View.GONE);
-                                v.setAlpha(0f);
+                                hideStockView(v);
                                 v.setBackground(null);
                             }
                         }
@@ -673,8 +715,7 @@ public class LauncherDockHook {
                         if (param.thisObject instanceof View) {
                             View v = (View) param.thisObject;
                             if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
-                                v.setVisibility(View.GONE);
-                                v.setAlpha(0f);
+                                hideStockView(v);
                                 v.setBackground(null);
                             }
                         }
@@ -847,8 +888,7 @@ public class LauncherDockHook {
                     if (param.thisObject instanceof View) {
                         View v = (View) param.thisObject;
                         if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
-                            v.setVisibility(View.GONE);
-                            v.setAlpha(0f);
+                            hideStockView(v);
                             if (v instanceof ImageView) {
                                 ((ImageView) v).setImageDrawable(null);
                             }
@@ -863,8 +903,7 @@ public class LauncherDockHook {
                     if (param.thisObject instanceof View) {
                         View v = (View) param.thisObject;
                         if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
-                            v.setVisibility(View.GONE);
-                            v.setAlpha(0f);
+                            hideStockView(v);
                             if (v instanceof ImageView) {
                                 ((ImageView) v).setImageDrawable(null);
                             }
@@ -885,8 +924,7 @@ public class LauncherDockHook {
                     if (param.thisObject instanceof View) {
                         View v = (View) param.thisObject;
                         if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
-                            v.setVisibility(View.GONE);
-                            v.setAlpha(0f);
+                            hideStockView(v);
                             if (v instanceof ImageView) {
                                 ((ImageView) v).setImageDrawable(null);
                             }
@@ -902,8 +940,7 @@ public class LauncherDockHook {
                     if (param.thisObject instanceof View) {
                         View v = (View) param.thisObject;
                         if (ConfigManager.shouldApplyDeXTaskbar(v.getContext())) {
-                            v.setVisibility(View.GONE);
-                            v.setAlpha(0f);
+                            hideStockView(v);
                             if (v instanceof ImageView) {
                                 ((ImageView) v).setImageDrawable(null);
                             }
@@ -926,8 +963,7 @@ public class LauncherDockHook {
         if (v == null) return;
         String clsName = v.getClass().getName();
         if (clsName.contains("CellBackground")) {
-            v.setVisibility(View.GONE);
-            v.setAlpha(0f);
+            hideStockView(v);
             if (v instanceof ImageView) {
                 ((ImageView) v).setImageDrawable(null);
             }
@@ -939,8 +975,7 @@ public class LauncherDockHook {
             for (int i = 0; i < vg.getChildCount(); i++) {
                 View child = vg.getChildAt(i);
                 if (child.getClass().getName().contains("CellBackground")) {
-                    child.setVisibility(View.GONE);
-                    child.setAlpha(0f);
+                    hideStockView(child);
                     if (child instanceof ImageView) {
                         ((ImageView) child).setImageDrawable(null);
                     }
@@ -992,8 +1027,7 @@ public class LauncherDockHook {
 
             // Option 1: Completely suppress Xiaomi's native HotSeats dock to eliminate
             // flexbox item stretching and duplicate drawer buttons!
-            hotSeatsView.setVisibility(View.GONE);
-            hotSeatsView.setAlpha(0f);
+            hideStockView(hotSeatsView);
 
             // Set standalone edge-to-edge DeX taskbar on the parent dock container
             ViewParent parent = hotSeatsView.getParent();
@@ -1016,21 +1050,12 @@ public class LauncherDockHook {
                 if (existingTaskbar != null) {
                     dockContainer.removeView(existingTaskbar);
                 }
-                if (isLaptopOverlay) {
-                    dockContainer.setVisibility(View.GONE);
-                    dockContainer.setAlpha(0f);
-                    ViewGroup.LayoutParams lp = dockContainer.getLayoutParams();
-                    if (lp instanceof android.view.WindowManager.LayoutParams) {
-                        android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) lp;
-                        wlp.height = 0;
-                        wlp.alpha = 0f;
-                        android.view.WindowManager wm = (android.view.WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
-                        if (wm != null) {
-                            try {
-                                wm.updateViewLayout(dockContainer, wlp);
-                            } catch (Throwable ignored) {}
-                        }
-                    }
+                restoreStockDock(dockContainer);
+                for (int i = 0; i < dockContainer.getChildCount(); i++) {
+                    restoreStockDock(dockContainer.getChildAt(i));
+                }
+                if (sLaptopOverlayRootView != null && sLaptopOverlayRootView != dockContainer) {
+                    restoreStockDock(sLaptopOverlayRootView);
                 }
                 return;
             }
@@ -1043,6 +1068,11 @@ public class LauncherDockHook {
                 return;
             }
 
+            sStockVisibility.putIfAbsent(dockContainer, new float[]{dockContainer.getVisibility(), dockContainer.getAlpha()});
+            if (!sStockBackgrounds.containsKey(dockContainer)) {
+                sStockBackgrounds.put(dockContainer, dockContainer.getBackground());
+            }
+            saveStockPadding(dockContainer);
             dockContainer.setVisibility(View.VISIBLE);
             dockContainer.setAlpha(1.0f);
             dockContainer.setBackground(null);
@@ -1056,6 +1086,7 @@ public class LauncherDockHook {
             // Dock Container layout params height, flush bottom inset removal, & WindowManager update
             applyWindowParamsIfNeeded(dockContainer, context, barHeightPx, bottomOffsetPx);
             if (sLaptopOverlayRootView != null && sLaptopOverlayRootView != dockContainer) {
+                saveStockPadding(sLaptopOverlayRootView);
                 sLaptopOverlayRootView.setPadding(0, 0, 0, 0);
                 applyWindowParamsIfNeeded(sLaptopOverlayRootView, context, barHeightPx, bottomOffsetPx);
             }
@@ -1068,8 +1099,7 @@ public class LauncherDockHook {
             for (int i = 0; i < dockContainer.getChildCount(); i++) {
                 View child = dockContainer.getChildAt(i);
                 if (child != null && child.getId() != R.id.dex_taskbar_view) {
-                    child.setVisibility(View.GONE);
-                    child.setAlpha(0f);
+                    hideStockView(child);
                 }
             }
 
@@ -1110,32 +1140,10 @@ public class LauncherDockHook {
         try {
             if (!(hotSeatsObj instanceof View)) return;
             View hotSeatsView = (View) hotSeatsObj;
-            if (hotSeatsView.getVisibility() == View.GONE) {
-                hotSeatsView.setVisibility(View.VISIBLE);
-                hotSeatsView.setAlpha(1.0f);
-            }
-
+            restoreStockDock(hotSeatsView);
             ViewParent parent = hotSeatsView.getParent();
             if (parent instanceof ViewGroup) {
-                ViewGroup dockContainer = (ViewGroup) parent;
-
-                View existingTaskbar = dockContainer.findViewById(R.id.dex_taskbar_view);
-                if (existingTaskbar != null) {
-                    dockContainer.removeView(existingTaskbar);
-                }
-
-                if (dockContainer.getClass().getName().contains("laptop.dockbar.DockContainerView")) {
-                    dockContainer.setVisibility(View.GONE);
-                } else {
-                    // Restore stock children
-                    for (int i = 0; i < dockContainer.getChildCount(); i++) {
-                        View child = dockContainer.getChildAt(i);
-                        if (child != null && child.getVisibility() != View.VISIBLE) {
-                            child.setVisibility(View.VISIBLE);
-                            child.setAlpha(1.0f);
-                        }
-                    }
-                }
+                applyDockContainerDeXStyle((ViewGroup) parent, hotSeatsView.getContext());
             }
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Error in restoreWorkstationStyle: " + t.getMessage());
@@ -1213,6 +1221,11 @@ public class LauncherDockHook {
             applyDockContainerDeXStyle(container, container.getContext());
             container.requestLayout();
             container.invalidate();
+            if (!ConfigManager.shouldApplyDeXTaskbar(container.getContext())) {
+                for (View view : new java.util.ArrayList<>(sStockVisibility.keySet())) {
+                    if (view != null) restoreStockDock(view);
+                }
+            }
         }
     }
 
@@ -1413,13 +1426,12 @@ public class LauncherDockHook {
     }
 
     private static void applyWindowParamsIfNeeded(View view, Context context, int barHeightPx, int bottomOffsetPx) {
-        if (view == null || context == null) return;
+        if (view == null || context == null || !ConfigManager.shouldApplyDeXTaskbar(context)) return;
         ViewGroup.LayoutParams lp = view.getLayoutParams();
         if (lp instanceof android.view.WindowManager.LayoutParams) {
             android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) lp;
-            if (wlp.height > 0 && wlp.height < dp(context, 200)) {
-                wlp.height = barHeightPx;
-            }
+            saveStockWindowParams(view, wlp);
+            wlp.height = barHeightPx;
             wlp.alpha = 1.0f;
             wlp.format = android.graphics.PixelFormat.TRANSLUCENT;
             wlp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
@@ -1463,11 +1475,11 @@ public class LauncherDockHook {
                             sLaptopOverlayRootView = view;
                             Context ctx = view.getContext();
                             if (ConfigManager.shouldApplyDeXTaskbar(ctx)) {
+                                saveStockWindowParams(view, wlp);
+                                saveStockPadding(view);
                                 int targetH = dp(ctx, ConfigManager.getTaskbarHeight(ctx));
                                 int bottomOffsetPx = dp(ctx, ConfigManager.getTaskbarBottomOffset(ctx));
-                                if (wlp.height > 0 && wlp.height < dp(ctx, 200)) {
-                                    wlp.height = targetH;
-                                }
+                                wlp.height = targetH;
                                 wlp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
                                 wlp.y = bottomOffsetPx;
                                 view.setPadding(0, 0, 0, 0);

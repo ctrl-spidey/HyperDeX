@@ -475,18 +475,11 @@ public class DeXDockAppsView extends HorizontalScrollView {
         }
         updateRunningDotsUi();
 
-        // 1. Broadcast to SystemUIHook WindowCaptionHook to play macOS squeezy minimize animation first,
-        // which then calls back ACTION_HIDE_TASK -> hideDesktopApps([taskId]).
-        try {
-            Intent intent = new Intent(Constants.ACTION_NAV_TRIGGER);
-            intent.setPackage("com.android.systemui");
-            intent.putExtra(Constants.EXTRA_NAV_ACTION, "minimize_task");
-            intent.putExtra("task_id", taskId);
-            context.sendBroadcast(intent);
-        } catch (Throwable ignored) {}
-
-        // 2. Failsafe native workstation hide after animation finishes in case task wasn't tracked by caption hook
-        postDelayed(() -> hideTaskDirectly(context, taskId), 360);
+        Intent intent = new Intent(Constants.ACTION_NAV_TRIGGER);
+        intent.setPackage(Constants.PKG_SYSTEMUI);
+        intent.putExtra(Constants.EXTRA_NAV_ACTION, "minimize_task");
+        intent.putExtra("task_id", taskId);
+        context.sendBroadcast(intent);
     }
 
     public static void hideTaskDirectly(Context context, int taskId) {
