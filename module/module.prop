@@ -1,6 +1,6 @@
 id=hyperdex_tablet
 name=HyperDeX - Samsung DeX for HyperOS Tablet
-version=v1.1.16
-versionCode=126
+version=v1.1.17
+versionCode=127
 author=@spideyHyperOS
 description=Transforms HyperOS Workstation Mode into Samsung Classic DeX. Features slim edge-to-edge taskbar, pinned app long-press management, desktop notification ingestion toast, and fluid animations. Crafted by @spideyHyperOS.

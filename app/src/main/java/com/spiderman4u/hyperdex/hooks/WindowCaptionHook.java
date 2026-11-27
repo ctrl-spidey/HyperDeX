@@ -342,21 +342,25 @@ public class WindowCaptionHook {
     private static boolean isTaskFullscreen(Object dotObj) {
         if (dotObj == null) return false;
         try {
-            int mode = XposedHelpers.getIntField(dotObj, "mWindowingMode");
-            return mode == 1;
-        } catch (Throwable ignored) {}
-        try {
             Object taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
             if (taskInfo != null) {
+                try {
+                    int mode = (int) XposedHelpers.callMethod(taskInfo, "getWindowingMode");
+                    if (mode > 0) return mode == 1;
+                } catch (Throwable ignored) {}
                 Object cfg = XposedHelpers.getObjectField(taskInfo, "configuration");
                 if (cfg != null) {
                     Object winCfg = XposedHelpers.getObjectField(cfg, "windowConfiguration");
                     if (winCfg != null) {
                         int mode = (int) XposedHelpers.callMethod(winCfg, "getWindowingMode");
-                        return mode == 1;
+                        if (mode > 0) return mode == 1;
                     }
                 }
             }
+        } catch (Throwable ignored) {}
+        try {
+            int mode = XposedHelpers.getIntField(dotObj, "mWindowingMode");
+            return mode == 1;
         } catch (Throwable ignored) {}
         return false;
     }
@@ -591,7 +595,9 @@ public class WindowCaptionHook {
                     float barThick = isRotated ? rawW : rawH;
 
                     TaskData data = sTaskDataMap.get(view);
-                    boolean isFs = data != null && data.isFullscreen;
+                    boolean isFs = (data != null && data.dotInstance != null)
+                            ? isTaskFullscreen(data.dotInstance)
+                            : (data != null && data.isFullscreen);
 
                     canvas.save();
                     if (isRotated) {
@@ -872,17 +878,38 @@ public class WindowCaptionHook {
     public static void performMaximize(Context context, int taskId, Object dotInstance, View captionView) {
         if (dotInstance == null) return;
         boolean currentlyFullscreen = isTaskFullscreen(dotInstance);
+        XposedBridge.log(TAG + "performMaximize taskId=" + taskId + " currentlyFullscreen=" + currentlyFullscreen);
 
         try {
             Object clickListener = XposedHelpers.getObjectField(dotInstance, "mOnMiuiCaptionClickListener");
             Object controller = XposedHelpers.getObjectField(dotInstance, "mMiuiDecorationController");
             if (clickListener != null && controller != null) {
                 if (currentlyFullscreen) {
-                    XposedHelpers.callMethod(clickListener, "handleFreeformClicked", captionView, controller);
+                    // Use direct AnimStarter first, or construct a MiuiCaptionStateButton so cast succeeds!
+                    try {
+                        Object animStarter = XposedHelpers.getObjectField(clickListener, "mMulWinSwitchAnimStarter");
+                        Object taskOrg = XposedHelpers.getObjectField(clickListener, "mShellTaskOrganizer");
+                        Object taskInfo = XposedHelpers.getObjectField(dotInstance, "mRunningTaskInfo");
+                        if (animStarter != null && taskOrg != null && taskInfo != null) {
+                            XposedHelpers.callMethod(animStarter, "switchFullscreenToFreeform", taskOrg, taskInfo);
+                            return;
+                        }
+                    } catch (Throwable ignored) {}
+
+                    Class<?> stateBtnCls = XposedHelpers.findClassIfExists(
+                            "com.android.wm.shell.multitasking.miuimultiwinswitch.miuiwindowdecor.handlemenu.MiuiCaptionStateButton",
+                            dotInstance.getClass().getClassLoader()
+                    );
+                    if (stateBtnCls != null && context != null) {
+                        Object stateBtn = XposedHelpers.newInstance(stateBtnCls, context);
+                        XposedHelpers.callMethod(stateBtn, "setSupported", true);
+                        XposedHelpers.callMethod(clickListener, "handleFreeformClicked", stateBtn, controller);
+                        return;
+                    }
                 } else {
                     XposedHelpers.callMethod(clickListener, "handleFullscreenClicked", controller);
+                    return;
                 }
-                return;
             }
         } catch (Throwable t) {
             XposedBridge.log(TAG + "handleFullscreenClicked/Freeform failed: " + t);
