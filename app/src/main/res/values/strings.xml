@@ -26,6 +26,7 @@
     <string name="opt_icon_size">Taskbar Icon Size</string>
     <string name="opt_icon_spacing">Icon Spacing</string>
     <string name="opt_taskbar_opacity">Taskbar Opacity</string>
+    <string name="opt_taskbar_bottom_offset">Taskbar Bottom Offset</string>
     <string name="btn_reset_defaults">Reset Sizing to DeX Defaults</string>
     
     <string name="title_actions">System Actions</string>

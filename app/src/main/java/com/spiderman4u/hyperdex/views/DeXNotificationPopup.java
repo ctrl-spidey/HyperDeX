@@ -255,7 +255,9 @@ public class DeXNotificationPopup {
         popup.setElevation(dp(context, 16));
 
         int xOffset = dp(context, 12);
-        int yOffset = dp(context, ConfigManager.getTaskbarHeight(context) + 6);
+        int yOffset = dp(context, ConfigManager.getTaskbarHeight(context) + Math.max(0, ConfigManager.getTaskbarBottomOffset(context)) + 8);
+        DeXQuickSettingsPopup.dismiss();
+        DeXClockPopup.dismiss();
         popup.showAtLocation(anchorView, Gravity.BOTTOM | Gravity.END, xOffset, yOffset);
         sCurrentPopup = popup;
 

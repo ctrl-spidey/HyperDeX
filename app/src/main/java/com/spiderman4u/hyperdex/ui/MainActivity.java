@@ -32,6 +32,8 @@ public class MainActivity extends AppCompatActivity {
     private SeekBar seekIconSpacing;
     private TextView tvTaskbarOpacityVal;
     private SeekBar seekTaskbarOpacity;
+    private TextView tvTaskbarOffsetVal;
+    private SeekBar seekTaskbarOffset;
     private MaterialButton btnResetDefaults;
 
     private MaterialButton btnRestart;
@@ -44,6 +46,8 @@ public class MainActivity extends AppCompatActivity {
     private static final int MAX_ICON_SPACING = 16;
     private static final int MIN_OPACITY = 40;
     private static final int MAX_OPACITY = 100;
+    private static final int MIN_BOTTOM_OFFSET = -8;
+    private static final int MAX_BOTTOM_OFFSET = 32;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -68,6 +72,8 @@ public class MainActivity extends AppCompatActivity {
         seekIconSpacing = findViewById(R.id.seek_icon_spacing);
         tvTaskbarOpacityVal = findViewById(R.id.tv_taskbar_opacity_val);
         seekTaskbarOpacity = findViewById(R.id.seek_taskbar_opacity);
+        tvTaskbarOffsetVal = findViewById(R.id.tv_taskbar_offset_val);
+        seekTaskbarOffset = findViewById(R.id.seek_taskbar_offset);
         btnResetDefaults = findViewById(R.id.btn_reset_defaults);
 
         btnRestart = findViewById(R.id.btn_restart);
@@ -80,6 +86,7 @@ public class MainActivity extends AppCompatActivity {
         seekIconSize.setMax(MAX_ICON_SIZE - MIN_ICON_SIZE);
         seekIconSpacing.setMax(MAX_ICON_SPACING - MIN_ICON_SPACING);
         seekTaskbarOpacity.setMax(MAX_OPACITY - MIN_OPACITY);
+        seekTaskbarOffset.setMax(MAX_BOTTOM_OFFSET - MIN_BOTTOM_OFFSET);
 
         loadPreferences();
         setupListeners();
@@ -112,6 +119,10 @@ public class MainActivity extends AppCompatActivity {
         int opacity = ConfigManager.getTaskbarOpacity(this);
         seekTaskbarOpacity.setProgress(Math.max(0, opacity - MIN_OPACITY));
         tvTaskbarOpacityVal.setText(opacity + "%");
+
+        int offset = ConfigManager.getTaskbarBottomOffset(this);
+        seekTaskbarOffset.setProgress(Math.max(0, Math.min(MAX_BOTTOM_OFFSET - MIN_BOTTOM_OFFSET, offset - MIN_BOTTOM_OFFSET)));
+        tvTaskbarOffsetVal.setText(formatOffsetText(offset));
 
         updateSubSwitchesEnabled(isDeX);
     }
@@ -207,6 +218,19 @@ public class MainActivity extends AppCompatActivity {
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
+        seekTaskbarOffset.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int val = MIN_BOTTOM_OFFSET + progress;
+                tvTaskbarOffsetVal.setText(formatOffsetText(val));
+                if (fromUser) {
+                    ConfigManager.setInt(MainActivity.this, Constants.PREF_TASKBAR_BOTTOM_OFFSET, val);
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
         btnResetDefaults.setOnClickListener(v -> {
             ConfigManager.resetTaskbarDefaults(this);
             loadPreferences();
@@ -236,7 +260,13 @@ public class MainActivity extends AppCompatActivity {
         seekIconSize.setEnabled(enabled);
         seekIconSpacing.setEnabled(enabled);
         seekTaskbarOpacity.setEnabled(enabled);
+        seekTaskbarOffset.setEnabled(enabled);
         btnResetDefaults.setEnabled(enabled);
+    }
+
+    private String formatOffsetText(int offsetDp) {
+        if (offsetDp == 0) return "0 dp (Flush)";
+        return (offsetDp > 0 ? "+" : "") + offsetDp + " dp";
     }
 
     private String getCurrentVersionName() {

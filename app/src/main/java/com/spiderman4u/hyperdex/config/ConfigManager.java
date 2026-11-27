@@ -23,6 +23,7 @@ public class ConfigManager {
     private static final String SETTING_ICON_SIZE = "hyperdex_icon_size";
     private static final String SETTING_ICON_SPACING = "hyperdex_icon_spacing";
     private static final String SETTING_TASKBAR_OPACITY = "hyperdex_taskbar_opacity";
+    private static final String SETTING_TASKBAR_BOTTOM_OFFSET = "hyperdex_taskbar_bottom_offset";
     private static final String SETTING_PINNED_PACKAGES = "hyperdex_pinned_packages";
 
     public static boolean isDeXModeEnabled(Context context) {
@@ -63,6 +64,10 @@ public class ConfigManager {
 
     public static int getTaskbarOpacity(Context context) {
         return getGlobalInt(context, SETTING_TASKBAR_OPACITY, Constants.DEFAULT_TASKBAR_OPACITY);
+    }
+
+    public static int getTaskbarBottomOffset(Context context) {
+        return getGlobalInt(context, SETTING_TASKBAR_BOTTOM_OFFSET, Constants.DEFAULT_TASKBAR_BOTTOM_OFFSET);
     }
 
     public static boolean isWorkstationMode(Context context) {
@@ -174,6 +179,7 @@ public class ConfigManager {
         setInt(context, Constants.PREF_ICON_SIZE, Constants.DEFAULT_ICON_SIZE);
         setInt(context, Constants.PREF_ICON_SPACING, Constants.DEFAULT_ICON_SPACING);
         setInt(context, Constants.PREF_TASKBAR_OPACITY, Constants.DEFAULT_TASKBAR_OPACITY);
+        setInt(context, Constants.PREF_TASKBAR_BOTTOM_OFFSET, Constants.DEFAULT_TASKBAR_BOTTOM_OFFSET);
         setBoolean(context, Constants.PREF_SHOW_NAV_BUTTONS, true);
         setBoolean(context, Constants.PREF_SHOW_SEARCH_BUTTON, true);
         setBoolean(context, Constants.PREF_FLOATING_POPUPS, true);
@@ -202,6 +208,7 @@ public class ConfigManager {
         if (Constants.PREF_ICON_SIZE.equals(prefKey)) return SETTING_ICON_SIZE;
         if (Constants.PREF_ICON_SPACING.equals(prefKey)) return SETTING_ICON_SPACING;
         if (Constants.PREF_TASKBAR_OPACITY.equals(prefKey)) return SETTING_TASKBAR_OPACITY;
+        if (Constants.PREF_TASKBAR_BOTTOM_OFFSET.equals(prefKey)) return SETTING_TASKBAR_BOTTOM_OFFSET;
         return SETTING_DEX_MODE;
     }
 

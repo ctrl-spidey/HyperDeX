@@ -213,6 +213,18 @@ public class SystemUIHook {
             case "power":
                 showPowerDialog();
                 break;
+            case "lock_screen":
+                lockScreen();
+                break;
+            case "toggle_wifi":
+                toggleWifi();
+                break;
+            case "toggle_bluetooth":
+                toggleBluetooth();
+                break;
+            case "toggle_dnd":
+                toggleDnd();
+                break;
         }
     }
 
@@ -478,6 +490,64 @@ public class SystemUIHook {
             }
         } catch (Throwable ignored) {}
         injectKey(KeyEvent.KEYCODE_POWER);
+    }
+
+    private static void lockScreen() {
+        try {
+            if (sContext != null) {
+                android.os.PowerManager pm = (android.os.PowerManager) sContext.getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    pm.getClass().getMethod("goToSleep", long.class).invoke(pm, SystemClock.uptimeMillis());
+                    return;
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "lockScreen goToSleep failed: " + t);
+        }
+        injectKey(KeyEvent.KEYCODE_POWER);
+    }
+
+    private static void toggleWifi() {
+        try {
+            if (sContext != null) {
+                android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) sContext.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                if (wm != null) {
+                    boolean next = !wm.isWifiEnabled();
+                    wm.setWifiEnabled(next);
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "toggleWifi failed: " + t);
+        }
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private static void toggleBluetooth() {
+        try {
+            android.bluetooth.BluetoothAdapter bt = android.bluetooth.BluetoothAdapter.getDefaultAdapter();
+            if (bt != null) {
+                if (bt.isEnabled()) bt.disable();
+                else bt.enable();
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "toggleBluetooth failed: " + t);
+        }
+    }
+
+    private static void toggleDnd() {
+        try {
+            if (sContext != null) {
+                android.app.NotificationManager nm = (android.app.NotificationManager) sContext.getSystemService(Context.NOTIFICATION_SERVICE);
+                if (nm != null) {
+                    boolean isDnd = nm.getCurrentInterruptionFilter() != android.app.NotificationManager.INTERRUPTION_FILTER_ALL;
+                    nm.setInterruptionFilter(isDnd
+                            ? android.app.NotificationManager.INTERRUPTION_FILTER_ALL
+                            : android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY);
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "toggleDnd failed: " + t);
+        }
     }
 
     private static void injectKey(int keyCode) {

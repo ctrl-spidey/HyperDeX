@@ -1,8 +1,12 @@
 package com.spiderman4u.hyperdex.hooks;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.app.ActivityManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.database.ContentObserver;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -29,7 +33,9 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -64,6 +70,8 @@ public class WindowCaptionHook {
     private static final Map<Object, TaskData> sDotToTaskDataMap = new WeakHashMap<>();
     private static final Map<Object, Object> sTouchListenerToDotMap = new WeakHashMap<>();
     private static final Map<View, float[]> sTouchTrackMap = new WeakHashMap<>();
+    private static final Map<Object, float[]> sLiveSurfaceData = new WeakHashMap<>();
+    private static final Set<Integer> sMinimizingTasks = ConcurrentHashMap.newKeySet();
     private static volatile Object sLastActiveDotObj = null;
     private static volatile long sLastActionTimestamp = 0L;
     private static volatile float sLastTouchRawX = -1f;
@@ -198,17 +206,22 @@ public class WindowCaptionHook {
                     Context context = getDotContext(param.thisObject);
                     if (!shouldShowWindowsControls(context)) return;
 
-                    Rect bounds = getTaskBounds(param.thisObject);
-                    int taskW = (bounds != null && bounds.width() > 0) ? bounds.width() : getDisplayBounds(context).width();
+                    float[] visRect = computeVisualTaskRect(param.thisObject, context);
+                    float visLeft = visRect[0];
+                    float visTop = visRect[1];
+                    float visW = visRect[2];
+                    float centerX = visLeft + visW / 2f;
                     float halfHitW = dp(context, PILL_WIDTH_DP / 2f + 12);
                     float maxHitH = dp(context, PILL_HEIGHT_DP + 16);
 
                     float x = ev.getX();
                     float y = ev.getY();
+                    float rawX = ev.getRawX();
+                    float rawY = ev.getRawY();
 
-                    boolean inLocal = Math.abs(x - taskW / 2f) <= halfHitW && y >= 0 && y <= maxHitH;
-                    boolean inScreen = bounds != null && Math.abs(x - (bounds.left + taskW / 2f)) <= halfHitW
-                            && y >= bounds.top - dp(context, 8) && y <= bounds.top + maxHitH;
+                    boolean inLocal = Math.abs(x - visW / 2f) <= halfHitW && y >= 0 && y <= maxHitH;
+                    boolean inScreen = Math.abs(rawX - centerX) <= halfHitW
+                            && rawY >= visTop - dp(context, 8) && rawY <= visTop + maxHitH;
 
                     if (inLocal || inScreen) {
                         param.setResult(true);
@@ -233,25 +246,16 @@ public class WindowCaptionHook {
 
                     TaskData data = sDotToTaskDataMap.get(dotObj);
                     int taskId = (data != null) ? data.taskId : -1;
-                    Rect bounds = getTaskBounds(dotObj);
                     float pillW = dp(context, PILL_WIDTH_DP);
-                    float centerX;
-                    if (bounds != null && bounds.width() > 0) {
-                        float scale = 1.0f;
-                        try {
-                            float s = XposedHelpers.getFloatField(dotObj, "mScale");
-                            if (s > 0.2f && s <= 1.5f) scale = s;
-                        } catch (Throwable ignored) {}
-                        centerX = bounds.left + (bounds.width() * scale) / 2f;
-                    } else {
-                        centerX = getDisplayBounds(context).width() / 2f;
-                    }
+                    float[] visRect = computeVisualTaskRect(dotObj, context);
+                    float centerX = visRect[0] + visRect[2] / 2f;
 
                     float pillLeft = centerX - pillW / 2f;
                     float ratio = (sLastTouchRawX >= 0f) ? ((sLastTouchRawX - pillLeft) / pillW) : 0.5f;
                     ratio = Math.max(0f, Math.min(1f, ratio));
 
-                    XposedBridge.log(TAG + "handleCaptionClicked rawX=" + sLastTouchRawX + " pillLeft=" + pillLeft + " ratio=" + ratio + " taskId=" + taskId);
+                    XposedBridge.log(TAG + "handleCaptionClicked rawX=" + sLastTouchRawX + " pillLeft=" + pillLeft
+                            + " visW=" + visRect[2] + " scale=" + visRect[4] + " ratio=" + ratio + " taskId=" + taskId);
 
                     View dotView = null;
                     try {
@@ -422,17 +426,109 @@ public class WindowCaptionHook {
 
         int pillW = dp(context, PILL_WIDTH_DP);
         int pillH = dp(context, PILL_HEIGHT_DP);
-        int taskW = (surfaceBounds != null && surfaceBounds.width() > 0)
-                ? surfaceBounds.width()
-                : getTaskWidth(dotObj, context);
 
+        if (surfaceBounds != null && surfaceBounds.width() > 0) {
+            sLiveSurfaceData.put(dotObj, new float[]{
+                    (float) surfaceBounds.left,
+                    (float) surfaceBounds.top,
+                    (float) surfaceBounds.right,
+                    (float) surfaceBounds.bottom,
+                    scale
+            });
+        }
+
+        // Only enforce pill surface crop & visibility; let Xiaomi updateTopCaptionSurface keep exact centered position during drags
         try {
-            float posX = Math.max(0f, (taskW - pillW * scale) / 2f);
-            float posY = dp(context, 2) * scale;
             XposedHelpers.callMethod(t, "setWindowCrop", surface, pillW, pillH);
-            XposedHelpers.callMethod(t, "setPosition", surface, posX, posY);
             XposedHelpers.callMethod(t, "show", surface);
         } catch (Throwable ignored) {}
+    }
+
+    /**
+     * Computes live visual task rectangle & scale on screen:
+     * returns {visLeft, visTop, visW, visH, scale, unscaledW, unscaledH}.
+     */
+    private static float[] computeVisualTaskRect(Object dotObj, Context context) {
+        Rect disp = getDisplayBounds(context);
+        if (dotObj == null) {
+            return new float[]{0f, 0f, disp.width(), disp.height(), 1.0f, disp.width(), disp.height()};
+        }
+
+        Rect cfgBounds = null;
+        try {
+            Object taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
+            if (taskInfo != null) {
+                Object cfg = XposedHelpers.getObjectField(taskInfo, "configuration");
+                if (cfg != null) {
+                    Object winCfg = XposedHelpers.getObjectField(cfg, "windowConfiguration");
+                    if (winCfg != null) {
+                        cfgBounds = (Rect) XposedHelpers.callMethod(winCfg, "getBounds");
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        float[] live = sLiveSurfaceData.get(dotObj);
+        Rect dotBounds = getTaskBounds(dotObj);
+
+        float scale = 1.0f;
+        if (live != null && live[4] > 0.15f && live[4] <= 2.0f) {
+            scale = live[4];
+        } else {
+            try {
+                float s = XposedHelpers.getFloatField(dotObj, "mScale");
+                if (s > 0.15f && s <= 2.0f) scale = s;
+            } catch (Throwable ignored) {}
+        }
+
+        boolean isFs = isTaskFullscreen(dotObj);
+        if (isFs) scale = 1.0f;
+
+        float left;
+        float top;
+        float w;
+        float h;
+        if (live != null && (live[2] - live[0]) > 10f) {
+            left = live[0];
+            top = live[1];
+            w = live[2] - live[0];
+            h = live[3] - live[1];
+        } else if (dotBounds != null && dotBounds.width() > 0) {
+            left = dotBounds.left;
+            top = dotBounds.top;
+            w = dotBounds.width();
+            h = dotBounds.height();
+        } else {
+            left = 0f;
+            top = 0f;
+            w = disp.width();
+            h = disp.height();
+        }
+
+        float unscaledW = (cfgBounds != null && cfgBounds.width() > 0) ? cfgBounds.width() : w;
+        float unscaledH = (cfgBounds != null && cfgBounds.height() > 0) ? cfgBounds.height() : h;
+
+        float visW;
+        float visH;
+        if (!isFs && scale < 0.99f) {
+            // Check whether bounds are already scaled screen coordinates vs unscaled task coordinates
+            if (cfgBounds != null && cfgBounds.width() > 0
+                    && Math.abs(w - cfgBounds.width()) > 12f
+                    && Math.abs(w - cfgBounds.width() * scale) < 28f) {
+                visW = w;
+                visH = h;
+            } else {
+                visW = w * scale;
+                visH = h * scale;
+                unscaledW = w;
+                unscaledH = h;
+            }
+        } else {
+            visW = w;
+            visH = h;
+        }
+
+        return new float[]{left, top, visW, visH, scale, unscaledW, unscaledH};
     }
 
     private static void linkDotAndHost(Object dotObj, Object[] args) {
@@ -837,6 +933,161 @@ public class WindowCaptionHook {
     }
 
     public static void performMinimize(Context context, int taskId, Object dotInstance) {
+        if (context == null) return;
+        if (dotInstance == null && taskId > 0) {
+            for (Map.Entry<Object, TaskData> e : sDotToTaskDataMap.entrySet()) {
+                if (e.getValue() != null && e.getValue().taskId == taskId) {
+                    dotInstance = e.getKey();
+                    break;
+                }
+            }
+        }
+        if (dotInstance == null) {
+            executeActualMinimize(context, taskId, null);
+            return;
+        }
+
+        final Object resolvedDot = dotInstance;
+        final int resolvedTaskId = taskId;
+        if (resolvedTaskId > 0 && !sMinimizingTasks.add(resolvedTaskId)) {
+            return;
+        }
+
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                Object taskSurface = null;
+                Object captionSurface = null;
+                try {
+                    Object ctrl = XposedHelpers.getObjectField(resolvedDot, "mMiuiDecorationController");
+                    if (ctrl != null) {
+                        taskSurface = XposedHelpers.getObjectField(ctrl, "mTaskSurface");
+                    }
+                } catch (Throwable ignored) {}
+                try {
+                    captionSurface = XposedHelpers.getObjectField(resolvedDot, "mCaptionContainerSurface");
+                } catch (Throwable ignored) {}
+
+                if (taskSurface == null) {
+                    if (resolvedTaskId > 0) sMinimizingTasks.remove(resolvedTaskId);
+                    executeActualMinimize(context, resolvedTaskId, resolvedDot);
+                    return;
+                }
+
+                playSqueezyMinimizeAndHide(context, resolvedTaskId, resolvedDot, taskSurface, captionSurface);
+            } catch (Throwable t) {
+                if (resolvedTaskId > 0) sMinimizingTasks.remove(resolvedTaskId);
+                executeActualMinimize(context, resolvedTaskId, resolvedDot);
+            }
+        });
+    }
+
+    private static void playSqueezyMinimizeAndHide(Context context, int taskId, Object dotObj,
+                                                   Object taskSurface, Object captionSurface) throws Throwable {
+        Rect disp = getDisplayBounds(context);
+        float[] vis = computeVisualTaskRect(dotObj, context);
+        final float startLeft = vis[0];
+        final float startTop = vis[1];
+        final float visW = vis[2];
+        final float visH = vis[3];
+        final float startScale = vis[4];
+        final float unscaledW = Math.max(100f, vis[5]);
+        final float unscaledH = Math.max(100f, vis[6]);
+        final float startCx = startLeft + visW / 2f;
+
+        // Genie toward bottom dock edge
+        final float dockTargetCx = startCx * 0.65f + (disp.width() * 0.5f) * 0.35f;
+        final float dockTargetBottomY = disp.height() - dp(context, 16);
+
+        final Class<?> scTxCls = Class.forName("android.view.SurfaceControl$Transaction");
+        final Class<?> scCls = Class.forName("android.view.SurfaceControl");
+        final Object fTaskSurf = taskSurface;
+        final Object fCapSurf = captionSurface;
+
+        ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
+        anim.setDuration(290);
+        anim.setInterpolator(new android.view.animation.PathInterpolator(0.32f, 0f, 0.14f, 1f));
+        anim.addUpdateListener(a -> {
+            float p = (float) a.getAnimatedValue();
+            try {
+                boolean valid = (boolean) XposedHelpers.callMethod(fTaskSurf, "isValid");
+                if (!valid) return;
+
+                float sxEase = (float) Math.pow(p, 0.85);
+                float syEase = p * p * (3f - 2f * p);
+                float posEase = (float) Math.pow(p, 1.35);
+
+                float curScaleX = Math.max(0.05f, startScale * (1f - 0.86f * sxEase));
+                float curScaleY = Math.max(0.05f, startScale * (1f - 0.76f * syEase));
+
+                float curVisW = unscaledW * curScaleX;
+                float curVisH = unscaledH * curScaleY;
+                float curCx = startCx + (dockTargetCx - startCx) * sxEase;
+                float targetTop = dockTargetBottomY - curVisH;
+
+                float curLeft = curCx - curVisW / 2f;
+                float curTop = startTop + (targetTop - startTop) * posEase;
+                float corner = 36f + 72f * p;
+                float alpha = p > 0.65f ? Math.max(0f, 1f - (p - 0.65f) / 0.35f) : 1f;
+
+                Object tx = scTxCls.newInstance();
+                XposedHelpers.callMethod(tx, "setMatrix", fTaskSurf, curScaleX, 0f, 0f, curScaleY);
+                XposedHelpers.callMethod(tx, "setPosition", fTaskSurf, curLeft, curTop);
+                XposedHelpers.callMethod(tx, "setCornerRadius", fTaskSurf, corner);
+                XposedHelpers.callMethod(tx, "setAlpha", fTaskSurf, alpha);
+                if (fCapSurf != null && (boolean) XposedHelpers.callMethod(fCapSurf, "isValid")) {
+                    XposedHelpers.callMethod(tx, "setAlpha", fCapSurf, Math.max(0f, 1f - p * 4f));
+                }
+                XposedHelpers.callMethod(tx, "apply");
+                XposedHelpers.callMethod(tx, "close");
+            } catch (Throwable ignored) {}
+        });
+
+        anim.addListener(new AnimatorListenerAdapter() {
+            private void finishAndRestoreSurface() {
+                if (taskId > 0) sMinimizingTasks.remove(taskId);
+                executeActualMinimize(context, taskId, dotObj);
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    try {
+                        if ((boolean) XposedHelpers.callMethod(fTaskSurf, "isValid")) {
+                            Object tx = scTxCls.newInstance();
+                            XposedHelpers.callMethod(tx, "setAlpha", fTaskSurf, 1.0f);
+                            XposedHelpers.callMethod(tx, "setCornerRadius", fTaskSurf, 36f);
+                            XposedHelpers.callMethod(tx, "setMatrix", fTaskSurf, startScale, 0f, 0f, startScale);
+                            if (fCapSurf != null && (boolean) XposedHelpers.callMethod(fCapSurf, "isValid")) {
+                                XposedHelpers.callMethod(tx, "setAlpha", fCapSurf, 1.0f);
+                            }
+                            XposedHelpers.callMethod(tx, "apply");
+                            XposedHelpers.callMethod(tx, "close");
+                        }
+                    } catch (Throwable ignored) {}
+                }, 240);
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                finishAndRestoreSurface();
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+                finishAndRestoreSurface();
+            }
+        });
+        anim.start();
+    }
+
+    private static void executeActualMinimize(Context context, int taskId, Object dotInstance) {
+        // 1. Trigger Xiaomi's native Desktop Mode hide via LauncherDockHook receiver
+        if (context != null && taskId > 0) {
+            try {
+                Intent hideIntent = new Intent(com.spiderman4u.hyperdex.config.Constants.ACTION_HIDE_TASK);
+                hideIntent.setPackage(com.spiderman4u.hyperdex.config.Constants.PKG_LAUNCHER);
+                hideIntent.putExtra("task_id", taskId);
+                context.sendBroadcast(hideIntent);
+            } catch (Throwable ignored) {}
+        }
+
+        // 2. Also reorder back via WindowContainerTransaction / ATM as fallback
         if (dotInstance != null) {
             try {
                 Object taskInfo = XposedHelpers.getObjectField(dotInstance, "mRunningTaskInfo");
@@ -850,7 +1101,7 @@ public class WindowCaptionHook {
                     return;
                 }
             } catch (Throwable t) {
-                XposedBridge.log(TAG + "performMinimize via WCT failed: " + t);
+                XposedBridge.log(TAG + "executeActualMinimize via WCT failed: " + t);
             }
         }
 

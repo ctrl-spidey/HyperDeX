@@ -406,6 +406,23 @@ public class LauncherDockHook {
                             }
                         }
                     }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            Context context = v.getContext();
+                            if (ConfigManager.shouldApplyDeXTaskbar(context)) {
+                                int targetH = dp(context, ConfigManager.getTaskbarHeight(context));
+                                if (v.getMeasuredHeight() != targetH && v.getMeasuredWidth() > 0) {
+                                    XposedHelpers.callMethod(v, "setMeasuredDimension", v.getMeasuredWidth(), targetH);
+                                }
+                                if (v.getPaddingBottom() != 0 || v.getPaddingTop() != 0) {
+                                    v.setPadding(0, 0, 0, 0);
+                                }
+                            }
+                        }
+                    }
                 });
 
                 // Full-width touchable region constrained to taskbar height
@@ -981,11 +998,13 @@ public class LauncherDockHook {
             dockContainer.setAlpha(1.0f);
             dockContainer.setBackground(null);
             dockContainer.setElevation(0f);
+            dockContainer.setPadding(0, 0, 0, 0);
 
             int barHeightDp = ConfigManager.getTaskbarHeight(context);
             int barHeightPx = dp(context, barHeightDp);
+            int bottomOffsetPx = dp(context, ConfigManager.getTaskbarBottomOffset(context));
 
-            // Dock Container layout params height & WindowManager update
+            // Dock Container layout params height, flush bottom inset removal, & WindowManager update
             ViewGroup.LayoutParams containerLp = dockContainer.getLayoutParams();
             if (containerLp != null) {
                 containerLp.height = barHeightPx;
@@ -995,6 +1014,15 @@ public class LauncherDockHook {
                     wlp.alpha = 1.0f;
                     wlp.format = android.graphics.PixelFormat.TRANSLUCENT;
                     wlp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
+                    wlp.y = bottomOffsetPx;
+                    try {
+                        wlp.setFitInsetsTypes(0);
+                    } catch (Throwable ignored) {}
+                    if (bottomOffsetPx < 0) {
+                        wlp.flags |= android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+                    } else {
+                        wlp.flags &= ~android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+                    }
                     android.view.WindowManager wm = (android.view.WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
                     if (wm != null) {
                         try {
@@ -1105,6 +1133,7 @@ public class LauncherDockHook {
                 "hyperdex_icon_size",
                 "hyperdex_icon_spacing",
                 "hyperdex_taskbar_opacity",
+                "hyperdex_taskbar_bottom_offset",
                 "hyperdex_show_nav_buttons",
                 "hyperdex_show_search_button",
                 "hyperdex_floating_popups",
@@ -1126,6 +1155,18 @@ public class LauncherDockHook {
                     refreshDock();
                 }
             }, filter, Context.RECEIVER_EXPORTED);
+
+            IntentFilter hideFilter = new IntentFilter(Constants.ACTION_HIDE_TASK);
+            context.registerReceiver(new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context ctx, Intent intent) {
+                    if (intent == null) return;
+                    int tid = intent.getIntExtra("task_id", -1);
+                    if (tid > 0) {
+                        DeXDockAppsView.hideTaskDirectly(ctx, tid);
+                    }
+                }
+            }, hideFilter, Context.RECEIVER_EXPORTED);
 
             sObserverRegistered = true;
             XposedBridge.log(TAG + "Observers and receiver registered successfully");
@@ -1166,7 +1207,10 @@ public class LauncherDockHook {
                 if (lp instanceof android.view.WindowManager.LayoutParams) {
                     android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) lp;
                     wlp.gravity = Gravity.BOTTOM | Gravity.FILL_HORIZONTAL;
-                    wlp.y = 0;
+                    wlp.y = dp(dockContainer.getContext(), ConfigManager.getTaskbarBottomOffset(dockContainer.getContext()));
+                    try {
+                        wlp.setFitInsetsTypes(0);
+                    } catch (Throwable ignored) {}
                     android.view.WindowManager wm = (android.view.WindowManager) dockContainer.getContext().getSystemService(Context.WINDOW_SERVICE);
                     if (wm != null) {
                         try {

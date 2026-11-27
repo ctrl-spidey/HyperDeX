@@ -136,10 +136,10 @@ public class DeXNotificationToastController {
                     dismissToastImmersive(wm, card, trayView);
                 });
 
-                int barHeight = ConfigManager.getTaskbarHeight(context);
+                int barHeight = ConfigManager.getTaskbarHeight(context) + Math.max(0, ConfigManager.getTaskbarBottomOffset(context));
                 int cardWidth = dp(context, 290);
                 int xOffset = dp(context, 14);
-                int yOffset = dp(context, barHeight + 14);
+                int yOffset = dp(context, barHeight + 12);
                 if (trayView != null && trayView.isAttachedToWindow() && wm != null) {
                     try {
                         int[] trayLoc = new int[2];

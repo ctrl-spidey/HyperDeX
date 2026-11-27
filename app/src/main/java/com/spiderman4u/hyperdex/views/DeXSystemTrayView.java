@@ -180,7 +180,7 @@ public class DeXSystemTrayView extends LinearLayout {
         clockLayout.setPadding(dp(6), 0, dp(4), 0);
         clockLayout.setOnClickListener(v -> {
             animateTapBounce(v);
-            openClock(context);
+            openClock(context, v);
         });
 
         tvTime = new TextView(context);
@@ -337,18 +337,8 @@ public class DeXSystemTrayView extends LinearLayout {
         } catch (Throwable ignored) {}
     }
 
-    private void openClock(Context context) {
-        try {
-            Intent intent = new Intent(Intent.ACTION_QUICK_CLOCK);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(intent);
-        } catch (Throwable t) {
-            try {
-                Intent intent = new Intent(Settings.ACTION_DATE_SETTINGS);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                context.startActivity(intent);
-            } catch (Throwable ignored) {}
-        }
+    private void openClock(Context context, View anchorView) {
+        DeXClockPopup.show(context, anchorView);
     }
 
     private void triggerScreenshot(Context context) {

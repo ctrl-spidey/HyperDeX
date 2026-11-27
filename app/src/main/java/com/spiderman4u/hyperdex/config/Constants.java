@@ -21,6 +21,7 @@ public final class Constants {
     public static final String PREF_ICON_SIZE = "pref_icon_size";
     public static final String PREF_ICON_SPACING = "pref_icon_spacing";
     public static final String PREF_TASKBAR_OPACITY = "pref_taskbar_opacity";
+    public static final String PREF_TASKBAR_BOTTOM_OFFSET = "pref_taskbar_bottom_offset";
     public static final String PREF_PINNED_PACKAGES = "pref_pinned_packages";
 
     public static final String ACTION_MODE_CHANGED = "com.spiderman4u.hyperdex.ACTION_MODE_CHANGED";
@@ -35,6 +36,7 @@ public final class Constants {
     public static final String ACTION_DISMISS_NOTIFICATION = "com.spiderman4u.hyperdex.ACTION_DISMISS_NOTIFICATION";
     public static final String ACTION_CLEAR_NOTIFICATIONS = "com.spiderman4u.hyperdex.ACTION_CLEAR_NOTIFICATIONS";
     public static final String ACTION_RESET_DOCK_BOTTOM = "com.spiderman4u.hyperdex.ACTION_RESET_DOCK_BOTTOM";
+    public static final String ACTION_HIDE_TASK = "com.spiderman4u.hyperdex.ACTION_HIDE_TASK";
 
     public static final String AUTHORITY = "com.spiderman4u.hyperdex.provider";
     public static final String METHOD_GET_PREFS = "get_prefs";
@@ -45,8 +47,9 @@ public final class Constants {
     public static final int DEFAULT_ICON_SIZE = 34;       // dp
     public static final int DEFAULT_ICON_SPACING = 6;      // dp
     public static final int DEFAULT_TASKBAR_OPACITY = 92;  // %
+    public static final int DEFAULT_TASKBAR_BOTTOM_OFFSET = 0; // dp
 
     // Developer Branding
     public static final String DEVELOPER_TAG = "@spideyHyperOS";
-    public static final String APP_VERSION_NAME = "1.1.18";
+    public static final String APP_VERSION_NAME = "1.1.19";
 }
