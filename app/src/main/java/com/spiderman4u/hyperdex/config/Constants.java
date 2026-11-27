@@ -51,5 +51,5 @@ public final class Constants {
 
     // Developer Branding
     public static final String DEVELOPER_TAG = "@spideyHyperOS";
-    public static final String APP_VERSION_NAME = "1.1.22";
+    public static final String APP_VERSION_NAME = "1.1.23";
 }

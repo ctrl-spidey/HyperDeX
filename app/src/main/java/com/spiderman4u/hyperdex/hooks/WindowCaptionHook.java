@@ -125,7 +125,23 @@ public class WindowCaptionHook {
             if (minAnimCls != null) {
                 XposedBridge.hookAllMethods(minAnimCls, "create", new XC_MethodHook() {
                     @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        // When our custom squeezy animation is active, suppress Xiaomi's native minimize
+                        // animation entirely to prevent double-animation glitch
+                        if (!sMinimizingTasks.isEmpty()) {
+                            // Return a no-op animator that does nothing
+                            ValueAnimator noop = ValueAnimator.ofFloat(0f, 1f);
+                            noop.setDuration(1);
+                            param.setResult(noop);
+                        }
+                    }
+
+                    @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.getResult() instanceof ValueAnimator) {
+                            ValueAnimator va = (ValueAnimator) param.getResult();
+                            if (va.getDuration() <= 1) return; // our no-op, skip
+                        }
                         Object res = param.getResult();
                         if (res instanceof android.animation.Animator) {
                             android.animation.Animator anim = (android.animation.Animator) res;
@@ -134,7 +150,7 @@ public class WindowCaptionHook {
                         }
                     }
                 });
-                XposedBridge.log(TAG + "MinimizeAnimator hooked for macOS-smooth curve");
+                XposedBridge.log(TAG + "MinimizeAnimator hooked - suppresses native when HyperDeX minimizing");
             }
         } catch (Throwable ignored) {}
     }
@@ -243,6 +259,9 @@ public class WindowCaptionHook {
                         return;
                     }
                     sLastActionTimestamp = now;
+
+                    // Clear stale surface data to force fresh MiuiFreeformModeTaskInfo lookup
+                    sLiveSurfaceData.remove(dotObj);
 
                     TaskData data = sDotToTaskDataMap.get(dotObj);
                     int taskId = (data != null) ? data.taskId : -1;
@@ -904,6 +923,10 @@ public class WindowCaptionHook {
 
             int taskId = (data != null) ? data.taskId : -1;
             Object dotObj = (data != null) ? data.dotInstance : sLastActiveDotObj;
+
+            // Clear stale surface data to force fresh rect calculation
+            if (dotObj != null) sLiveSurfaceData.remove(dotObj);
+
             XposedBridge.log(TAG + "handlePillTouch UP x=" + touchAlong + "/" + barLen + " ratio=" + ratio + " taskId=" + taskId);
 
             if (ratio < 0.34f) {
@@ -990,6 +1013,9 @@ public class WindowCaptionHook {
             return;
         }
 
+        // Clear stale surface data before animation to ensure fresh rect
+        sLiveSurfaceData.remove(resolvedDot);
+
         new Handler(Looper.getMainLooper()).post(() -> {
             try {
                 Object taskSurface = null;
@@ -1030,66 +1056,115 @@ public class WindowCaptionHook {
         final float unscaledW = Math.max(100f, vis[5]);
         final float unscaledH = Math.max(100f, vis[6]);
         final float startCx = startLeft + visW / 2f;
+        final float startCy = startTop + visH / 2f;
 
-        // Genie toward bottom dock edge
-        final float dockTargetCx = startCx * 0.65f + (disp.width() * 0.5f) * 0.35f;
-        final float dockTargetBottomY = disp.height() - dp(context, 16);
+        // Target: taskbar icon area (center-bottom of display)
+        final float dockTargetCx = startCx * 0.55f + (disp.width() * 0.5f) * 0.45f;
+        final float dockTargetCy = disp.height() - dp(context, 26);
 
         final Class<?> scTxCls = Class.forName("android.view.SurfaceControl$Transaction");
-        final Class<?> scCls = Class.forName("android.view.SurfaceControl");
         final Object fTaskSurf = taskSurface;
         final Object fCapSurf = captionSurface;
 
+        // Immediately hide caption pill to prevent lingering artifact
+        try {
+            if (fCapSurf != null && (boolean) XposedHelpers.callMethod(fCapSurf, "isValid")) {
+                Object hideTx = scTxCls.newInstance();
+                XposedHelpers.callMethod(hideTx, "setAlpha", fCapSurf, 0f);
+                XposedHelpers.callMethod(hideTx, "apply");
+                XposedHelpers.callMethod(hideTx, "close");
+            }
+        } catch (Throwable ignored) {}
+
+        // Raise the surface layer during animation to prevent z-fighting
+        try {
+            Object layerTx = scTxCls.newInstance();
+            XposedHelpers.callMethod(layerTx, "setLayer", fTaskSurf, Integer.MAX_VALUE - 1);
+            XposedHelpers.callMethod(layerTx, "apply");
+            XposedHelpers.callMethod(layerTx, "close");
+        } catch (Throwable ignored) {}
+
         ValueAnimator anim = ValueAnimator.ofFloat(0f, 1f);
-        anim.setDuration(290);
-        anim.setInterpolator(new android.view.animation.PathInterpolator(0.32f, 0f, 0.14f, 1f));
+        anim.setDuration(380);  // Longer for smoother macOS-like feel
+        // macOS minimize uses a smooth ease-in-out with slight overshoot
+        anim.setInterpolator(new android.view.animation.PathInterpolator(0.4f, 0f, 0.15f, 1f));
         anim.addUpdateListener(a -> {
             float p = (float) a.getAnimatedValue();
             try {
                 boolean valid = (boolean) XposedHelpers.callMethod(fTaskSurf, "isValid");
                 if (!valid) return;
 
-                float sxEase = (float) Math.pow(p, 0.85);
-                float syEase = p * p * (3f - 2f * p);
-                float posEase = (float) Math.pow(p, 1.35);
+                // Smooth hermite interpolation for natural deceleration
+                float smoothP = p * p * (3f - 2f * p);
 
-                float curScaleX = Math.max(0.05f, startScale * (1f - 0.86f * sxEase));
-                float curScaleY = Math.max(0.05f, startScale * (1f - 0.76f * syEase));
+                // Scale: uniform shrink from 1.0 → 0.08 (squeezy into dock)
+                float targetScale = 0.08f;
+                float curScale = startScale * (1f - (1f - targetScale) * smoothP);
+                curScale = Math.max(0.04f, curScale);
 
-                float curVisW = unscaledW * curScaleX;
-                float curVisH = unscaledH * curScaleY;
-                float curCx = startCx + (dockTargetCx - startCx) * sxEase;
-                float targetTop = dockTargetBottomY - curVisH;
+                // Position: smooth arc from current center to dock center
+                // X moves linearly, Y follows a slight parabolic arc for "suction" feel
+                float arcT = (float) Math.pow(p, 1.2);  // Slightly accelerating toward dock
+                float curCx = startCx + (dockTargetCx - startCx) * smoothP;
+                float curCy = startCy + (dockTargetCy - startCy) * arcT;
 
-                float curLeft = curCx - curVisW / 2f;
-                float curTop = startTop + (targetTop - startTop) * posEase;
-                float corner = 36f + 72f * p;
-                float alpha = p > 0.65f ? Math.max(0f, 1f - (p - 0.65f) / 0.35f) : 1f;
+                // Translate position: surface origin = center minus half-scaled-size
+                float curLeft = curCx - (unscaledW * curScale) / 2f;
+                float curTop = curCy - (unscaledH * curScale) / 2f;
+
+                // Corner radius: increases as it shrinks for rounded pill effect
+                float corner = 24f + 108f * smoothP;
+
+                // Alpha: fully visible until 60%, then fade out smoothly
+                float alpha;
+                if (p < 0.60f) {
+                    alpha = 1f;
+                } else {
+                    float fadeP = (p - 0.60f) / 0.40f;
+                    alpha = Math.max(0f, 1f - fadeP * fadeP);  // Quadratic fade for smoothness
+                }
 
                 Object tx = scTxCls.newInstance();
-                XposedHelpers.callMethod(tx, "setMatrix", fTaskSurf, curScaleX, 0f, 0f, curScaleY);
+                XposedHelpers.callMethod(tx, "setMatrix", fTaskSurf, curScale, 0f, 0f, curScale);
                 XposedHelpers.callMethod(tx, "setPosition", fTaskSurf, curLeft, curTop);
                 XposedHelpers.callMethod(tx, "setCornerRadius", fTaskSurf, corner);
                 XposedHelpers.callMethod(tx, "setAlpha", fTaskSurf, alpha);
-                if (fCapSurf != null && (boolean) XposedHelpers.callMethod(fCapSurf, "isValid")) {
-                    XposedHelpers.callMethod(tx, "setAlpha", fCapSurf, Math.max(0f, 1f - p * 4f));
-                }
                 XposedHelpers.callMethod(tx, "apply");
                 XposedHelpers.callMethod(tx, "close");
             } catch (Throwable ignored) {}
         });
 
         anim.addListener(new AnimatorListenerAdapter() {
-            private void finishAndRestoreSurface() {
-                if (taskId > 0) sMinimizingTasks.remove(taskId);
+            private boolean finished = false;
+
+            private void finishMinimize() {
+                if (finished) return;
+                finished = true;
+
+                // First hide the surface immediately (alpha=0) before WCT to prevent flash
+                try {
+                    if ((boolean) XposedHelpers.callMethod(fTaskSurf, "isValid")) {
+                        Object hideTx = scTxCls.newInstance();
+                        XposedHelpers.callMethod(hideTx, "setAlpha", fTaskSurf, 0f);
+                        XposedHelpers.callMethod(hideTx, "apply");
+                        XposedHelpers.callMethod(hideTx, "close");
+                    }
+                } catch (Throwable ignored) {}
+
+                // Execute the actual WCT minimize
                 executeActualMinimize(context, taskId, dotObj);
+
+                // Restore surface properties after system has hidden the task (delayed to avoid flash)
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    if (taskId > 0) sMinimizingTasks.remove(taskId);
                     try {
                         if ((boolean) XposedHelpers.callMethod(fTaskSurf, "isValid")) {
                             Object tx = scTxCls.newInstance();
                             XposedHelpers.callMethod(tx, "setAlpha", fTaskSurf, 1.0f);
-                            XposedHelpers.callMethod(tx, "setCornerRadius", fTaskSurf, 36f);
+                            XposedHelpers.callMethod(tx, "setCornerRadius", fTaskSurf, 24f);
                             XposedHelpers.callMethod(tx, "setMatrix", fTaskSurf, startScale, 0f, 0f, startScale);
+                            // Reset position to original
+                            XposedHelpers.callMethod(tx, "setPosition", fTaskSurf, startLeft, startTop);
                             if (fCapSurf != null && (boolean) XposedHelpers.callMethod(fCapSurf, "isValid")) {
                                 XposedHelpers.callMethod(tx, "setAlpha", fCapSurf, 1.0f);
                             }
@@ -1097,17 +1172,17 @@ public class WindowCaptionHook {
                             XposedHelpers.callMethod(tx, "close");
                         }
                     } catch (Throwable ignored) {}
-                }, 240);
+                }, 400);
             }
 
             @Override
             public void onAnimationEnd(Animator animation) {
-                finishAndRestoreSurface();
+                finishMinimize();
             }
 
             @Override
             public void onAnimationCancel(Animator animation) {
-                finishAndRestoreSurface();
+                finishMinimize();
             }
         });
         anim.start();
