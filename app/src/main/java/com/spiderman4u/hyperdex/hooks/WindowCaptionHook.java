@@ -39,8 +39,8 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class WindowCaptionHook {
 
     private static final String TAG = "[HyperDeX-Caption] ";
-    private static final int PILL_WIDTH_DP = 120;
-    private static final int PILL_HEIGHT_DP = 24;
+    private static final int PILL_WIDTH_DP = 112;
+    private static final int PILL_HEIGHT_DP = 20;
 
     private static final List<WeakReference<View>> sStatusBarViews = new ArrayList<>();
     private static boolean sStatusBarObserverRegistered = false;
@@ -373,7 +373,7 @@ public class WindowCaptionHook {
         int pillH = dp(context, PILL_HEIGHT_DP);
         int taskW = getTaskWidth(dotObj, context);
         int capX = Math.max(0, (taskW - pillW) / 2);
-        int capY = dp(context, 4);
+        int capY = dp(context, 2);
 
         try {
             Object result = XposedHelpers.getObjectField(dotObj, "mResult");
@@ -428,7 +428,7 @@ public class WindowCaptionHook {
 
         try {
             float posX = Math.max(0f, (taskW - pillW * scale) / 2f);
-            float posY = dp(context, 4) * scale;
+            float posY = dp(context, 2) * scale;
             XposedHelpers.callMethod(t, "setWindowCrop", surface, pillW, pillH);
             XposedHelpers.callMethod(t, "setPosition", surface, posX, posY);
             XposedHelpers.callMethod(t, "show", surface);
@@ -595,9 +595,18 @@ public class WindowCaptionHook {
                     float barThick = isRotated ? rawW : rawH;
 
                     TaskData data = sTaskDataMap.get(view);
-                    boolean isFs = (data != null && data.dotInstance != null)
-                            ? isTaskFullscreen(data.dotInstance)
-                            : (data != null && data.isFullscreen);
+                    boolean isFs = false;
+                    if (data != null && data.dotInstance != null) {
+                        isFs = isTaskFullscreen(data.dotInstance);
+                        if (!isFs) {
+                            Rect b = getTaskBounds(data.dotInstance);
+                            if (b != null && b.width() >= getDisplayBounds(context).width() - dp(context, 40)) {
+                                isFs = true;
+                            }
+                        }
+                    } else if (data != null) {
+                        isFs = data.isFullscreen;
+                    }
 
                     canvas.save();
                     if (isRotated) {
