@@ -454,6 +454,45 @@ public class WindowCaptionHook {
             return new float[]{0f, 0f, disp.width(), disp.height(), 1.0f, disp.width(), disp.height()};
         }
 
+        TaskData data = sDotToTaskDataMap.get(dotObj);
+        int taskId = (data != null) ? data.taskId : -1;
+        boolean isFs = isTaskFullscreen(dotObj);
+
+        // 1. Prefer live MiuiFreeformModeTaskInfo from MultiTaskingTaskRepository (exact scaled screen rect even mid-drag!)
+        if (!isFs && taskId > 0) {
+            try {
+                Object repo = XposedHelpers.getObjectField(dotObj, "mMultiTaskingTaskRepository");
+                if (repo != null) {
+                    Object ffInfo = XposedHelpers.callMethod(repo, "getMiuiFreeformTaskInfo", taskId);
+                    if (ffInfo != null) {
+                        Rect scaledBounds = (Rect) XposedHelpers.callMethod(ffInfo, "getScaledBounds");
+                        Rect rawBounds = (Rect) XposedHelpers.callMethod(ffInfo, "getBounds");
+                        float ffScale = 1.0f;
+                        try {
+                            ffScale = (float) XposedHelpers.callMethod(ffInfo, "getFreeformScale");
+                        } catch (Throwable ignored) {}
+                        if (scaledBounds != null && scaledBounds.width() > 10 && scaledBounds.height() > 10) {
+                            float uw = (rawBounds != null && rawBounds.width() > 10)
+                                    ? rawBounds.width()
+                                    : (ffScale > 0.1f ? scaledBounds.width() / ffScale : scaledBounds.width());
+                            float uh = (rawBounds != null && rawBounds.height() > 10)
+                                    ? rawBounds.height()
+                                    : (ffScale > 0.1f ? scaledBounds.height() / ffScale : scaledBounds.height());
+                            return new float[]{
+                                    (float) scaledBounds.left,
+                                    (float) scaledBounds.top,
+                                    (float) scaledBounds.width(),
+                                    (float) scaledBounds.height(),
+                                    (ffScale > 0.1f && ffScale <= 2.0f) ? ffScale : 1.0f,
+                                    uw,
+                                    uh
+                            };
+                        }
+                    }
+                }
+            } catch (Throwable ignored) {}
+        }
+
         Rect cfgBounds = null;
         try {
             Object taskInfo = XposedHelpers.getObjectField(dotObj, "mRunningTaskInfo");
@@ -481,7 +520,6 @@ public class WindowCaptionHook {
             } catch (Throwable ignored) {}
         }
 
-        boolean isFs = isTaskFullscreen(dotObj);
         if (isFs) scale = 1.0f;
 
         float left;
@@ -511,7 +549,6 @@ public class WindowCaptionHook {
         float visW;
         float visH;
         if (!isFs && scale < 0.99f) {
-            // Check whether bounds are already scaled screen coordinates vs unscaled task coordinates
             if (cfgBounds != null && cfgBounds.width() > 0
                     && Math.abs(w - cfgBounds.width()) > 12f
                     && Math.abs(w - cfgBounds.width() * scale) < 28f) {
@@ -1077,7 +1114,7 @@ public class WindowCaptionHook {
     }
 
     private static void executeActualMinimize(Context context, int taskId, Object dotInstance) {
-        // 1. Trigger Xiaomi's native Desktop Mode hide via LauncherDockHook receiver
+        // 1. Broadcast to LauncherDockHook receiver
         if (context != null && taskId > 0) {
             try {
                 Intent hideIntent = new Intent(com.spiderman4u.hyperdex.config.Constants.ACTION_HIDE_TASK);
@@ -1087,17 +1124,39 @@ public class WindowCaptionHook {
             } catch (Throwable ignored) {}
         }
 
-        // 2. Also reorder back via WindowContainerTransaction / ATM as fallback
+        // 2. Submit WindowContainerTransaction (setAlwaysOnTop=false + reorder to back) via WM Shell Transitions
+        // Matches Xiaomi MiuiDesktopModeTransitionHandler.fillHideFreeformWct + startDesktopTransition
         if (dotInstance != null) {
             try {
                 Object taskInfo = XposedHelpers.getObjectField(dotInstance, "mRunningTaskInfo");
-                Object taskOrg = XposedHelpers.getObjectField(dotInstance, "mTaskOrganizer");
-                if (taskInfo != null && taskOrg != null) {
-                    Object token = XposedHelpers.getObjectField(taskInfo, "token");
+                Object token = (taskInfo != null) ? XposedHelpers.getObjectField(taskInfo, "token") : null;
+                if (token != null) {
                     Class<?> wctCls = Class.forName("android.window.WindowContainerTransaction");
                     Object wct = wctCls.newInstance();
+                    try {
+                        XposedHelpers.callMethod(wct, "setAlwaysOnTop", token, false);
+                    } catch (Throwable ignored) {}
                     XposedHelpers.callMethod(wct, "reorder", token, false);
-                    XposedHelpers.callMethod(taskOrg, "applyTransaction", wct);
+
+                    boolean startedTransition = false;
+                    try {
+                        Object transitions = XposedHelpers.getObjectField(dotInstance, "mTransitions");
+                        if (transitions != null) {
+                            // WindowManager.TRANSIT_TO_BACK == 4
+                            XposedHelpers.callMethod(transitions, "startTransition", 4, wct, null);
+                            startedTransition = true;
+                            XposedBridge.log(TAG + "executeActualMinimize via Transitions.startTransition(TO_BACK) taskId=" + taskId);
+                        }
+                    } catch (Throwable t) {
+                        XposedBridge.log(TAG + "Transitions.startTransition failed: " + t);
+                    }
+
+                    if (!startedTransition) {
+                        Object taskOrg = XposedHelpers.getObjectField(dotInstance, "mTaskOrganizer");
+                        if (taskOrg != null) {
+                            XposedHelpers.callMethod(taskOrg, "applyTransaction", wct);
+                        }
+                    }
                     return;
                 }
             } catch (Throwable t) {

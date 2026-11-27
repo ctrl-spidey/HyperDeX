@@ -282,10 +282,7 @@ public class LauncherDockHook {
             XposedBridge.hookAllMethods(dockCtrlCls, "updateDockWindowHeight", new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                    Context context = null;
-                    if (sCurrentHotSeatsInstance instanceof View) {
-                        context = ((View) sCurrentHotSeatsInstance).getContext();
-                    }
+                    Context context = resolveControllerContext(param.thisObject);
                     if (context != null && ConfigManager.shouldApplyDeXTaskbar(context)) {
                         try {
                             int targetH = dp(context, ConfigManager.getTaskbarHeight(context));
@@ -303,15 +300,22 @@ public class LauncherDockHook {
             XposedBridge.hookAllMethods(dockCtrlCls, "getDockWindowHeight", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                    Context context = null;
-                    if (sCurrentHotSeatsInstance instanceof View) {
-                        context = ((View) sCurrentHotSeatsInstance).getContext();
-                    }
+                    Context context = resolveControllerContext(param.thisObject);
                     if (context != null && ConfigManager.shouldApplyDeXTaskbar(context)) {
                         param.setResult(dp(context, ConfigManager.getTaskbarHeight(context)));
                     }
                 }
             });
+
+            Class<?> defaultImplsCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.laptop.dockbar.DockController$DefaultImpls", lpparam.classLoader);
+            if (defaultImplsCls != null) {
+                XposedBridge.hookAllMethods(defaultImplsCls, "updateDockWindowHeight", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        refreshDock();
+                    }
+                });
+            }
 
             XposedBridge.log(TAG + "LaptopDockController hooks applied");
         } catch (Throwable t) {
@@ -374,13 +378,43 @@ public class LauncherDockHook {
                     }
                 });
 
-                // Suppress stock children during dock layouts
+                // Strip bottom system bar insets padding on FitSystemWindowView subclass
+                XposedBridge.hookAllMethods(cls, "onApplyWindowInsets", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof ViewGroup) {
+                            ViewGroup container = (ViewGroup) param.thisObject;
+                            Context ctx = container.getContext();
+                            if (ConfigManager.shouldApplyDeXTaskbar(ctx)) {
+                                if (container.getPaddingBottom() != 0 || container.getPaddingTop() != 0) {
+                                    container.setPadding(0, 0, 0, 0);
+                                }
+                                container.post(() -> applyDockContainerDeXStyle(container, ctx));
+                            }
+                        }
+                    }
+                });
+
+                // Suppress stock children and keep container flush during dock layouts
                 XposedBridge.hookAllMethods(cls, "onLayout", new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.thisObject instanceof ViewGroup) {
                             ViewGroup container = (ViewGroup) param.thisObject;
-                            if (ConfigManager.shouldApplyDeXTaskbar(container.getContext())) {
+                            Context ctx = container.getContext();
+                            if (ConfigManager.shouldApplyDeXTaskbar(ctx)) {
+                                if (container.getPaddingBottom() != 0 || container.getPaddingTop() != 0) {
+                                    container.setPadding(0, 0, 0, 0);
+                                }
+                                int targetH = dp(ctx, ConfigManager.getTaskbarHeight(ctx));
+                                int targetY = dp(ctx, ConfigManager.getTaskbarBottomOffset(ctx));
+                                ViewGroup.LayoutParams lp = container.getLayoutParams();
+                                if (lp instanceof android.view.WindowManager.LayoutParams) {
+                                    android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) lp;
+                                    if (wlp.height != targetH || wlp.y != targetY) {
+                                        container.post(() -> applyDockContainerDeXStyle(container, ctx));
+                                    }
+                                }
                                 for (int i = 0; i < container.getChildCount(); i++) {
                                     View child = container.getChildAt(i);
                                     if (child != null && child.getId() != R.id.dex_taskbar_view) {
@@ -1393,6 +1427,21 @@ public class LauncherDockHook {
         } catch (Throwable t) {
             XposedBridge.log(TAG + "Failed hooking DockWindowManager: " + t);
         }
+    }
+
+    private static Context resolveControllerContext(Object controller) {
+        if (sCurrentHotSeatsInstance instanceof View) {
+            return ((View) sCurrentHotSeatsInstance).getContext();
+        }
+        if (sCurrentDockContainerInstance instanceof View) {
+            return ((View) sCurrentDockContainerInstance).getContext();
+        }
+        if (controller != null) {
+            try {
+                return (Context) XposedHelpers.getObjectField(controller, "mContext");
+            } catch (Throwable ignored) {}
+        }
+        return null;
     }
 
     private static int dp(Context context, int val) {
