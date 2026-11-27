@@ -5,9 +5,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.database.ContentObserver;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.PorterDuff;
 import android.graphics.Rect;
 import android.graphics.Region;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
@@ -66,6 +69,14 @@ public class LauncherDockHook {
                 return;
             }
 
+            // Hook isOpaque
+            XposedBridge.hookAllMethods(hotSeatsCls, "isOpaque", new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    param.setResult(false);
+                }
+            });
+
             // Hook onAttachedToWindow
             XposedBridge.hookAllMethods(hotSeatsCls, "onAttachedToWindow", new XC_MethodHook() {
                 @Override
@@ -77,6 +88,8 @@ public class LauncherDockHook {
                         registerObserver(context);
                         if (ConfigManager.shouldApplyDeXTaskbar(context)) {
                             applyDockLayout(param.thisObject, context);
+                        } else {
+                            hotSeatsView.setBackground(new ColorDrawable(Color.TRANSPARENT));
                         }
                     }
                 }
@@ -1233,18 +1246,89 @@ public class LauncherDockHook {
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.thisObject instanceof View) {
                             View v = (View) param.thisObject;
-                            v.setBackgroundColor(Color.TRANSPARENT);
+                            v.setBackground(new ColorDrawable(Color.TRANSPARENT));
+                        }
+                    }
+                });
+                XposedBridge.hookAllMethods(normalDockCls, "isOpaque", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult(false);
+                    }
+                });
+                XposedBridge.hookAllMethods(normalDockCls, "dispatchDraw", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args.length > 0 && param.args[0] instanceof Canvas) {
+                            ((Canvas) param.args[0]).drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+                        }
+                    }
+                });
+                XposedBridge.hookAllMethods(normalDockCls, "onDraw", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args.length > 0 && param.args[0] instanceof Canvas) {
+                            ((Canvas) param.args[0]).drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
                         }
                     }
                 });
                 XposedBridge.hookAllMethods(normalDockCls, "setBackground", new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        param.args[0] = null;
+                        param.args[0] = new ColorDrawable(Color.TRANSPARENT);
                     }
                 });
+                XposedBridge.log(TAG + "Normal mode DockContainerView hooked with transparent clear");
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Failed hooking normal DockContainerView: " + t);
+        }
+
+        try {
+            Class<?> dragLayerCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.dock.DockContainerView$DockDragLayer", lpparam.classLoader);
+            if (dragLayerCls != null) {
+                XposedBridge.hookAllMethods(dragLayerCls, "onAttachedToWindow", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.thisObject instanceof View) {
+                            View v = (View) param.thisObject;
+                            v.setBackground(new ColorDrawable(Color.TRANSPARENT));
+                        }
+                    }
+                });
+                XposedBridge.hookAllMethods(dragLayerCls, "isOpaque", new XC_MethodHook() {
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        param.setResult(false);
+                    }
+                });
+                XposedBridge.hookAllMethods(dragLayerCls, "dispatchDraw", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args.length > 0 && param.args[0] instanceof Canvas) {
+                            ((Canvas) param.args[0]).drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+                        }
+                    }
+                });
+                XposedBridge.hookAllMethods(dragLayerCls, "onDraw", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (param.args.length > 0 && param.args[0] instanceof Canvas) {
+                            ((Canvas) param.args[0]).drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
+                        }
+                    }
+                });
+                XposedBridge.hookAllMethods(dragLayerCls, "setBackground", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        param.args[0] = new ColorDrawable(Color.TRANSPARENT);
+                    }
+                });
+                XposedBridge.log(TAG + "DockDragLayer hooked with transparent clear");
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Failed hooking DockDragLayer: " + t);
+        }
 
         try {
             Class<?> dockWmCls = XposedHelpers.findClassIfExists("com.miui.home.launcher.dock.v3.view.DockWindowManager", lpparam.classLoader);
@@ -1255,13 +1339,16 @@ public class LauncherDockHook {
                         try {
                             View root = (View) XposedHelpers.getObjectField(param.thisObject, "dockRootView");
                             if (root != null) {
-                                root.setBackgroundColor(Color.TRANSPARENT);
+                                root.setBackground(new ColorDrawable(Color.TRANSPARENT));
                             }
                         } catch (Throwable ignored) {}
                     }
                 });
+                XposedBridge.log(TAG + "DockWindowManager hooked");
             }
-        } catch (Throwable ignored) {}
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + "Failed hooking DockWindowManager: " + t);
+        }
     }
 
     private static int dp(Context context, int val) {

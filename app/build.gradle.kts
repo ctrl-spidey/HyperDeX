@@ -10,8 +10,8 @@ android {
         applicationId = "com.spiderman4u.hyperdex"
         minSdk = 30
         targetSdk = 35
-        versionCode = 122
-        versionName = "1.1.12"
+        versionCode = 123
+        versionName = "1.1.13"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
