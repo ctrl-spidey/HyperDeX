@@ -245,7 +245,7 @@ public class MainActivity extends AppCompatActivity {
             tvModeTitle.setText(R.string.title_active_mode);
             tvModeDesc.setText(R.string.desc_mode_dex);
         } else {
-            tvModeTitle.setText("HyperOS Standard Mode");
+            tvModeTitle.setText("Workstation");
             tvModeDesc.setText(R.string.desc_mode_workstation);
         }
     }

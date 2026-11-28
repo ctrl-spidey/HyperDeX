@@ -49,6 +49,7 @@ public class LauncherDockHook {
     private static Object sCurrentDockContainerInstance = null;
     private static View sLaptopOverlayRootView = null;
     private static boolean sObserverRegistered = false;
+    private static boolean sAllAppsOverlayExpanded;
 
     private static final Map<View, float[]> sStockVisibility = new WeakHashMap<>();
     private static final Map<View, WindowManager.LayoutParams> sStockWindowParams = new WeakHashMap<>();
@@ -1257,6 +1258,19 @@ public class LauncherDockHook {
         try {
             Class<?> allAppsCtrl = XposedHelpers.findClassIfExists("com.miui.home.launcher.laptop.AllAppsController", lpparam.classLoader);
             if (allAppsCtrl != null) {
+                XposedBridge.hookAllMethods(allAppsCtrl, "updateDockWindowSizeMode", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        if (param.args.length == 1 && param.args[0] instanceof Boolean) {
+                            sAllAppsOverlayExpanded = (boolean) param.args[0];
+                        }
+                    }
+
+                    @Override
+                    protected void afterHookedMethod(MethodHookParam param) {
+                        if (!sAllAppsOverlayExpanded) resetDockToBottom();
+                    }
+                });
                 String[] resetMethods = new String[] {
                     "closeAllApps", "onHomeButtonPressed", "onBackPressed", "onScreenContentHide", "changeScreenContentOnClose"
                 };
@@ -1426,7 +1440,8 @@ public class LauncherDockHook {
     }
 
     private static void applyWindowParamsIfNeeded(View view, Context context, int barHeightPx, int bottomOffsetPx) {
-        if (view == null || context == null || !ConfigManager.shouldApplyDeXTaskbar(context)) return;
+        if (view == null || context == null || !ConfigManager.shouldApplyDeXTaskbar(context)
+                || (sAllAppsOverlayExpanded && view == sLaptopOverlayRootView)) return;
         ViewGroup.LayoutParams lp = view.getLayoutParams();
         if (lp instanceof android.view.WindowManager.LayoutParams) {
             android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) lp;
@@ -1474,7 +1489,7 @@ public class LauncherDockHook {
                         if (isLaptopDock) {
                             sLaptopOverlayRootView = view;
                             Context ctx = view.getContext();
-                            if (ConfigManager.shouldApplyDeXTaskbar(ctx)) {
+                            if (ConfigManager.shouldApplyDeXTaskbar(ctx) && !sAllAppsOverlayExpanded) {
                                 saveStockWindowParams(view, wlp);
                                 saveStockPadding(view);
                                 int targetH = dp(ctx, ConfigManager.getTaskbarHeight(ctx));

@@ -1,41 +1,35 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">HyperDeX</string>
-    <string name="app_subtitle">Samsung Classic DeX Experience for HyperOS</string>
-    <string name="developer_tag">by @spideyHyperOS</string>
-    <string name="developer_credit">Crafted with passion by @spideyHyperOS</string>
-    
-    <string name="title_active_mode">Samsung Classic DeX</string>
-    <string name="desc_mode_dex">Transforms HyperOS Workstation Mode into authentic Samsung Classic DeX with slim taskbar, start menu, system tray, and multitasking.</string>
-    <string name="desc_mode_workstation">Stock Xiaomi HyperOS Workstation Mode active.</string>
-    
-    <string name="title_taskbar_opts">Taskbar Controls</string>
-    <string name="opt_start_menu">Samsung 9-Dot Start Button</string>
-    <string name="opt_start_menu_desc">Anchor app drawer / spotlight button to bottom-left with DeX grid icon</string>
-    <string name="opt_nav_buttons">DeX Navigation Buttons</string>
-    <string name="opt_nav_buttons_desc">Display authentic Recents [ ||| ], Home [ ◯ ], and Back [ &lt; ] buttons on far-left</string>
-    <string name="opt_search_button">DeX Search Button</string>
-    <string name="opt_search_button_desc">Display dedicated Search [ Q ] shortcut next to navigation controls</string>
-    <string name="opt_floating_popups">Floating Popups &amp; Tray Toasts</string>
-    <string name="opt_floating_popups_desc">Show compact Samsung DeX Quick Settings &amp; immersive notification ingestion toasts</string>
-    <string name="opt_window_controls">Windows Titlebar Controls</string>
-    <string name="opt_window_controls_desc">Replace Xiaomi 3-dot window handle with desktop Minimize, Maximize, and Close buttons</string>
-
-    <string name="title_dimensions">Dimensions &amp; Spacing</string>
-    <string name="opt_taskbar_height">Taskbar Height</string>
-    <string name="opt_icon_size">Taskbar Icon Size</string>
-    <string name="opt_icon_spacing">Icon Spacing</string>
-    <string name="opt_taskbar_opacity">Taskbar Opacity</string>
-    <string name="opt_taskbar_bottom_offset">Taskbar Bottom Offset</string>
-    <string name="btn_reset_defaults">Reset Sizing to DeX Defaults</string>
-    
-    <string name="title_actions">System Actions</string>
-    <string name="btn_restart_launcher">Apply &amp; Restart Launcher</string>
-    <string name="btn_restart_launcher_desc">Safely reloads Launcher and SystemUI to apply all hooks instantly</string>
-    <string name="toast_restarted">HyperDeX v%1$s applied • Rebuilt by @spideyHyperOS</string>
-    <string name="toast_reset_defaults">Taskbar sizing reset to DeX defaults • @spideyHyperOS</string>
-    <string name="footer_credit">HyperDeX v%1$s • Rebuilt exclusively for Xiaomi Pad by @spideyHyperOS</string>
-
-    <string name="qs_tile_dex">DeX Mode</string>
-    <string name="qs_tile_workstation">Workstation</string>
+  <string name="app_name">HyperDeX</string>
+  <string name="app_subtitle">Samsung Classic DeX Experience for HyperOS</string>
+  <string name="developer_tag">by @spideyHyperOS</string>
+  <string name="developer_credit">Crafted with passion by @spideyHyperOS</string>
+  <string name="title_active_mode">Classic DeX</string>
+  <string name="desc_mode_dex">A full-width taskbar with app shortcuts and window controls.</string>
+  <string name="desc_mode_workstation">Xiaomi’s original desktop and centered dock.</string>
+  <string name="title_taskbar_opts">Taskbar Controls</string>
+  <string name="opt_start_menu">Samsung 9-Dot Start Button</string>
+  <string name="opt_start_menu_desc">Anchor app drawer / spotlight button to bottom-left with DeX grid icon</string>
+  <string name="opt_nav_buttons">DeX Navigation Buttons</string>
+  <string name="opt_nav_buttons_desc">Display authentic Recents [ ||| ], Home [ ◯ ], and Back [ &lt; ] buttons on far-left</string>
+  <string name="opt_search_button">DeX Search Button</string>
+  <string name="opt_search_button_desc">Display dedicated Search [ Q ] shortcut next to navigation controls</string>
+  <string name="opt_floating_popups">Floating Popups &amp; Tray Toasts</string>
+  <string name="opt_floating_popups_desc">Show compact Samsung DeX Quick Settings &amp; immersive notification ingestion toasts</string>
+  <string name="opt_window_controls">Windows Titlebar Controls</string>
+  <string name="opt_window_controls_desc">Replace Xiaomi 3-dot window handle with desktop Minimize, Maximize, and Close buttons</string>
+  <string name="title_dimensions">Dimensions &amp; Spacing</string>
+  <string name="opt_taskbar_height">Taskbar Height</string>
+  <string name="opt_icon_size">Taskbar Icon Size</string>
+  <string name="opt_icon_spacing">Icon Spacing</string>
+  <string name="opt_taskbar_opacity">Taskbar Opacity</string>
+  <string name="opt_taskbar_bottom_offset">Taskbar Bottom Offset</string>
+  <string name="btn_reset_defaults">Reset Sizing to DeX Defaults</string>
+  <string name="title_actions">System Actions</string>
+  <string name="btn_restart_launcher">Apply &amp; Restart Launcher</string>
+  <string name="btn_restart_launcher_desc">Safely reloads Launcher and SystemUI to apply all hooks instantly</string>
+  <string name="toast_restarted">HyperDeX v%1$s applied • Rebuilt by @spideyHyperOS</string>
+  <string name="toast_reset_defaults">Taskbar sizing reset to DeX defaults • @spideyHyperOS</string>
+  <string name="footer_credit">HyperDeX %1$s · @spideyHyperOS</string>
+  <string name="qs_tile_dex">DeX Mode</string>
+  <string name="qs_tile_workstation">Workstation</string>
 </resources>

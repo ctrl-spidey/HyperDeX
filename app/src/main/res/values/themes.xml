@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.HyperDeX" parent="Theme.Material3.Dark.NoActionBar">
-        <item name="colorPrimary">@color/primary</item>
-        <item name="colorSecondary">@color/secondary</item>
-        <item name="android:statusBarColor">@color/background_dark</item>
-        <item name="android:navigationBarColor">@color/background_dark</item>
-        <item name="android:windowBackground">@color/background_dark</item>
+    <style name="Theme.HyperDeX" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">#405A3D</item>
+        <item name="colorSecondary">#53634F</item>
+        <item name="android:statusBarColor">#F5F3E9</item>
+        <item name="android:navigationBarColor">#F5F3E9</item>
+        <item name="android:windowBackground">#F5F3E9</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>

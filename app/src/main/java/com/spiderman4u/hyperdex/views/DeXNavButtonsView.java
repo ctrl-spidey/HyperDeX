@@ -10,6 +10,7 @@ import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 
@@ -18,6 +19,9 @@ import com.spiderman4u.hyperdex.config.ConfigManager;
 import com.spiderman4u.hyperdex.hooks.SystemUIHook;
 
 import java.lang.reflect.Method;
+
+import de.robv.android.xposed.XposedBridge;
+import de.robv.android.xposed.XposedHelpers;
 
 public class DeXNavButtonsView extends LinearLayout {
 
@@ -205,26 +209,54 @@ public class DeXNavButtonsView extends LinearLayout {
 
     private void triggerSearch(Context context) {
         Object launcher = getLauncher(context);
-        if (launcher != null) {
-            try {
-                Method getLaptopCtrl = launcher.getClass().getMethod("getLaptopAllAppsController");
-                Object laptopCtrl = getLaptopCtrl.invoke(launcher);
-                if (laptopCtrl != null) {
-                    Method showSearch = laptopCtrl.getClass().getMethod("showSearchApps");
-                    showSearch.invoke(laptopCtrl);
-                    return;
+        if (launcher == null) return;
+
+        try {
+            Object controller = XposedHelpers.callMethod(
+                    launcher, "getLaptopAllAppsController");
+            if (controller != null) {
+                if (isLaptopAppsOpen(controller)) {
+                    showLaptopSearch(controller);
+                } else {
+                    toggleAppDrawer(context);
+                    postDelayed(() -> {
+                        if (isAttachedToWindow() && isLaptopAppsOpen(controller)) {
+                            showLaptopSearch(controller);
+                        }
+                    }, 250);
                 }
-            } catch (Throwable ignored) {}
-            try {
-                Method showSearchDialog = launcher.getClass().getMethod("showHomeSearchBarDialog");
-                showSearchDialog.invoke(launcher);
                 return;
-            } catch (Throwable ignored) {}
-            try {
-                Method showMethod = launcher.getClass().getMethod("showOrHideAllAppsWindow");
-                showMethod.invoke(launcher);
-                return;
-            } catch (Throwable ignored) {}
+            }
+        } catch (Throwable ignored) {}
+
+        toggleAppDrawer(context);
+    }
+
+    private boolean isLaptopAppsOpen(Object controller) {
+        try {
+            return (boolean) XposedHelpers.callMethod(
+                    controller, "isShowLaptopAllApps");
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private void showLaptopSearch(Object controller) {
+        try {
+            XposedHelpers.callMethod(controller, "showSearchApps");
+            Object searchBar = XposedHelpers.callMethod(controller, "getLaptopSearchBar");
+            if (searchBar == null) return;
+            Object field = XposedHelpers.getObjectField(searchBar, "mInput");
+            if (field instanceof View) {
+                View input = (View) field;
+                input.post(() -> {
+                    if (!input.isShown() || !input.requestFocus()) return;
+                    InputMethodManager keyboard = input.getContext().getSystemService(InputMethodManager.class);
+                    if (keyboard != null) keyboard.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT);
+                });
+            }
+        } catch (Throwable t) {
+            XposedBridge.log("[HyperDeX-Dock] App search unavailable: " + t);
         }
     }
 

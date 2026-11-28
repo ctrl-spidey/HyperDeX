@@ -1,33 +1,44 @@
 # HyperDeX
 
-HyperDeX gives Xiaomi and Redmi tablet users a desktop-style workspace in HyperOS. Switch between the stock Workstation layout and the HyperDeX layout from the companion app or a Quick Settings tile.
+Two desktop layouts for rooted Xiaomi and Redmi tablets. Keep the centered **HyperOS Workstation** dock, or switch to **Classic DeX** for a full-width taskbar, app search, and desktop window controls.
 
-**[Download the latest release](https://github.com/spider-man4u/HyperDeX/releases/latest)**
+[Download a tagged release](https://github.com/ctrl-spidey/HyperDeX/releases/latest) · [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/ctrl-spidey/HyperDeX/issues)
 
-## The desktop layout
+![HyperDeX desktop settings on a tablet](docs/screenshots/desktop-settings.png)
 
-- Launch apps from the lower-left corner and switch between them from a full-width taskbar.
-- Minimize, maximize, restore, or close floating windows from their title bars.
-- Open the clock, notifications, and quick settings from the system tray.
+## Choose your desktop
 
-## Installation
+| Workstation | Classic DeX |
+| --- | --- |
+| Xiaomi’s stock desktop and centered dock | Full-width taskbar with running apps and a system tray |
+| Native launcher and window controls | Minimize, maximize, restore, and close from the window caption |
+| Switch back from the companion app or Quick Settings tile | Open the app grid, search by name, and adjust taskbar size and spacing |
 
-HyperDeX targets rooted Xiaomi and Redmi tablets running HyperOS with Workstation Mode. Set up a compatible Zygisk environment and LSPosed before installing. The root module installer recognizes KernelSU, Magisk, and APatch.
+![Taskbar sizing controls](docs/screenshots/taskbar-fit.png)
 
-1. From the latest release, download the versioned HyperDeX ZIP and install it with your root manager. The ZIP bundles the companion APK. For a standalone LSPosed installation, the same release also includes `HyperDeX.apk`.
-2. In LSPosed, enable HyperDeX and check that its scope includes **System Launcher** (`com.miui.home`) and **System UI** (`com.android.systemui`).
-3. Reboot the tablet, enter Workstation Mode, and open HyperDeX to select the desktop layout. To switch from the notification shade, add the HyperDeX tile to Quick Settings.
+## Install
 
-## Build from source
+You’ll need a rooted HyperOS tablet with working Workstation Mode, a compatible Zygisk setup, and LSPosed or Vector. HyperDeX uses Xiaomi Launcher and System UI internals, so compatibility depends on your firmware.
 
-Use JDK 17 and Android SDK Platform 35. From the repository root, run:
+1. Download the **versioned ZIP** from [Releases](https://github.com/ctrl-spidey/HyperDeX/releases). Flash it through KernelSU, Magisk, or APatch. The installer bundles the companion APK.
+2. Open your Xposed manager and enable **HyperDeX**. Verify that **System Launcher** (`com.miui.home`) and **System UI** (`com.android.systemui`) are in scope.
+3. Reboot, enter Xiaomi’s **Workstation Mode**, then open HyperDeX and select **Use Classic DeX**. Turn that switch off to return to the stock dock.
+4. For quick switching, edit the Quick Settings shade and add the HyperDeX tile.
+
+The release also includes a standalone APK for an existing Xposed setup. If installing manually, grant the companion permission to write its settings from an authorized ADB shell:
+
+```sh
+pm grant com.spiderman4u.hyperdex android.permission.WRITE_SECURE_SETTINGS
+```
+
+## Build
+
+Use JDK 17 and Android SDK Platform 35.
 
 ```sh
 ./gradlew assembleDebug
 ```
 
-The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`. The [release workflow](.github/workflows) builds the release APK, packages the root module, and generates SHA-256 checksums.
-
-## License
+The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. The [release workflow](.github/workflows/build.yml) packages the release APK, module ZIP, and checksums. Screenshots above show the development build on the main branch.
 
 [Apache License 2.0](LICENSE)
