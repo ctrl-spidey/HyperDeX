@@ -44,6 +44,8 @@ You’ll need a rooted HyperOS tablet with working Workstation Mode, a compatibl
 3. Reboot, enter Xiaomi’s **Workstation Mode**, then open HyperDeX and select **Use Classic DeX**. Turn that switch off to return to the stock dock.
 4. For quick switching, edit the Quick Settings shade and add the HyperDeX tile.
 
+**Upgrading from v1.1.23 or earlier:** v1.1.24 uses a dedicated signing key. If Android reports a signature mismatch, uninstall the older companion APK first, then install the new version and re-enable its Xposed scope. Uninstalling may clear app settings.
+
 The release also includes a standalone APK for an existing Xposed setup. If installing manually, grant the companion permission to write its settings from an authorized ADB shell:
 
 ```sh

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v1.1.24
 
 - Redesigned the companion app with a two-column tablet layout and a stacked layout for narrower windows.
 - Grouped desktop controls and taskbar sizing, with live values alongside each slider.
