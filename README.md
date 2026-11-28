@@ -4,8 +4,6 @@ Two desktop layouts for rooted Xiaomi and Redmi tablets. Keep the centered **Hyp
 
 [Download a tagged release](https://github.com/ctrl-spidey/HyperDeX/releases/latest) · [Changelog](CHANGELOG.md) · [Report an issue](https://github.com/ctrl-spidey/HyperDeX/issues)
 
-![HyperDeX desktop settings on a tablet](docs/screenshots/desktop-settings.png)
-
 ## Choose your desktop
 
 | Workstation | Classic DeX |
@@ -14,7 +12,28 @@ Two desktop layouts for rooted Xiaomi and Redmi tablets. Keep the centered **Hyp
 | Native launcher and window controls | Minimize, maximize, restore, and close from the window caption |
 | Switch back from the companion app or Quick Settings tile | Open the app grid, search by name, and adjust taskbar size and spacing |
 
-![Taskbar sizing controls](docs/screenshots/taskbar-fit.png)
+## Screenshots
+
+Explore HyperDeX on a tablet, including the desktop layouts, windowed apps, and companion settings. Tap any image to view it at full resolution.
+
+### Desktop experience
+
+| Desktop preview | Desktop preview |
+| :---: | :---: |
+| <img src="docs/screenshots/Screenshot_2026-11-28-10-06-09-607_com.miui.home.jpg" alt="HyperDeX desktop screenshot 1" width="100%"> | <img src="docs/screenshots/Screenshot_2026-11-28-10-06-56-247_com.miui.home.jpg" alt="HyperDeX desktop screenshot 2" width="100%"> |
+| <img src="docs/screenshots/Screenshot_2026-11-28-10-07-07-256_com.miui.home.jpg" alt="HyperDeX desktop screenshot 3" width="100%"> | <img src="docs/screenshots/Screenshot_2026-11-28-10-09-50-426_com.miui.home.jpg" alt="HyperDeX desktop screenshot 4" width="100%"> |
+| <img src="docs/screenshots/Screenshot_2026-11-28-10-09-57-980_com.miui.home.jpg" alt="HyperDeX desktop screenshot 5" width="100%"> | <img src="docs/screenshots/Screenshot_2026-11-28-10-10-00-758_com.miui.home.jpg" alt="HyperDeX desktop screenshot 6" width="100%"> |
+| <img src="docs/screenshots/Screenshot_2026-11-28-10-10-08-070_com.miui.home.jpg" alt="HyperDeX desktop screenshot 7" width="100%"> | <img src="docs/screenshots/Screenshot_2026-11-28-10-10-34-926_com.twitter.android.jpg" alt="HyperDeX desktop with another application" width="100%"> |
+
+### Apps and windowed workflow
+
+| App preview | App preview |
+| :---: | :---: |
+| <img src="docs/screenshots/Screenshot_2026-11-28-10-07-35-144_com.android.chrome.jpg" alt="Chrome running in HyperDeX screenshot 1" width="100%"> | <img src="docs/screenshots/Screenshot_2026-11-28-10-07-37-799_com.android.chrome.jpg" alt="Chrome running in HyperDeX screenshot 2" width="100%"> |
+
+### HyperDeX companion app
+
+<img src="docs/screenshots/Screenshot_2026-11-28-10-10-55-599_com.spiderman4u.hyperdex.jpg" alt="HyperDeX companion app settings" width="100%">
 
 ## Install
 
@@ -39,6 +58,6 @@ Use JDK 17 and Android SDK Platform 35.
 ./gradlew assembleDebug
 ```
 
-The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. The [release workflow](.github/workflows/build.yml) packages the release APK, module ZIP, and checksums. Screenshots above show the development build on the main branch.
+The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. The [release workflow](.github/workflows/build.yml) packages the release APK, module ZIP, and checksums. Screenshots above show HyperDeX running on a tablet.
 
 [Apache License 2.0](LICENSE)
